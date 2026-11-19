@@ -1,0 +1,216 @@
+@import 'tailwindcss';
+
+/*
+ * 设计令牌。每个天气场景通过 <html data-scene="..."> 切换一组变量；
+ * 天空渐变本身在 src/lib/scene.ts 中定义，便于做交叉淡化。
+ */
+:root {
+  --fg: #2b1b12;
+  --fg-muted: rgb(43 27 18 / 0.68);
+  --accent: #e08a00;
+  --accent-fg: #ffffff;
+  --danger: #c62828;
+  --glass-tint: 255 255 255;
+  --glass-alpha: 0.24;
+  --glass-border: rgb(255 255 255 / 0.45);
+  --glass-highlight: rgb(255 255 255 / 0.55);
+  --glass-shadow: 0 8px 32px rgb(80 30 10 / 0.18);
+  --glass-blur: 24px;
+  /* 画质档位调整模糊半径：高 1、中 0.67（24px → 16px），低档直接关闭模糊 */
+  --blur-scale: 1;
+  --field-bg: rgb(255 255 255 / 0.35);
+  /* 无模糊时的玻璃底色：浅色场景偏白，深色场景偏深，保证文字对比度 */
+  --glass-solid: rgb(255 255 255 / 0.6);
+  /* 底部栏、弹窗下面压着内容，需要更不透明 */
+  --glass-solid-thick: rgb(255 255 255 / 0.97);
+  color-scheme: light;
+}
+
+[data-quality='medium'] {
+  --blur-scale: 0.67;
+}
+
+[data-scene='cloudy'] {
+  --fg: #10233f;
+  --fg-muted: rgb(16 35 63 / 0.66);
+  --accent: #1f7ae0;
+  --glass-shadow: 0 8px 32px rgb(20 50 100 / 0.16);
+}
+
+[data-scene='rain'],
+[data-scene='thunder'],
+[data-scene='night'] {
+  --fg: #f4f7ff;
+  --fg-muted: rgb(244 247 255 / 0.72);
+  --glass-tint: 255 255 255;
+  --glass-alpha: 0.12;
+  --glass-border: rgb(255 255 255 / 0.22);
+  --glass-highlight: rgb(255 255 255 / 0.3);
+  --glass-shadow: 0 8px 32px rgb(0 0 0 / 0.3);
+  --field-bg: rgb(255 255 255 / 0.1);
+  --danger: #ff8a80;
+  --glass-solid: rgb(16 26 46 / 0.72);
+  --glass-solid-thick: rgb(16 26 46 / 0.97);
+  color-scheme: dark;
+}
+[data-scene='rain'] {
+  --accent: #38e1ff;
+  --accent-fg: #062330;
+}
+[data-scene='thunder'] {
+  --accent: #b388ff;
+  --accent-fg: #1b0d33;
+}
+[data-scene='night'] {
+  --accent: #c9d6ff;
+  --accent-fg: #101a3a;
+}
+
+[data-scene='snow'],
+[data-scene='fog'] {
+  --fg: #1d2735;
+  --fg-muted: rgb(29 39 53 / 0.64);
+  --accent: #3b82c4;
+  --glass-alpha: 0.4;
+  --glass-shadow: 0 8px 32px rgb(40 60 90 / 0.14);
+}
+
+@theme inline {
+  --color-fg: var(--fg);
+  --color-fg-muted: var(--fg-muted);
+  --color-accent: var(--accent);
+  --color-accent-fg: var(--accent-fg);
+  --color-danger: var(--danger);
+  --font-sans:
+    'PingFang SC', 'HarmonyOS Sans SC', 'MiSans', 'Noto Sans SC', 'Microsoft YaHei', system-ui, -apple-system,
+    sans-serif;
+  /* 温度、时间等数字：优先用西文字体，避免中文字体里的全角符号 */
+  --font-num: 'SF Pro Display', 'Helvetica Neue', 'Roboto', 'Segoe UI', Arial, sans-serif;
+  --radius-card: 24px;
+}
+
+@layer base {
+  html,
+  body,
+  #root {
+    min-height: 100%;
+  }
+  body {
+    @apply font-sans text-fg antialiased;
+    background: #8fa7d9;
+    transition: color 1.2s ease;
+    -webkit-tap-highlight-color: transparent;
+    overscroll-behavior-y: none;
+  }
+  :focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
+}
+
+@layer components {
+  /*
+   * 玻璃态三档：thin 用于背景提示，默认用于卡片，thick 用于底部栏和弹窗。
+   * --mx / --my 由 GlassCard 根据指针位置写入，生成跟随指针的高光。
+   */
+  .glass,
+  .glass-thin,
+  .glass-thick {
+    position: relative;
+    isolation: isolate;
+    background: rgb(var(--glass-tint) / var(--glass-alpha));
+    border: 1px solid var(--glass-border);
+    border-radius: var(--radius-card);
+    box-shadow:
+      inset 0 1px 0 var(--glass-highlight),
+      var(--glass-shadow);
+    /* 带前缀的写在前面：反过来写时，压缩后的产物会丢掉标准属性，Chrome 就没有模糊效果 */
+    -webkit-backdrop-filter: blur(calc(var(--glass-blur) * var(--blur-scale))) saturate(160%);
+    backdrop-filter: blur(calc(var(--glass-blur) * var(--blur-scale))) saturate(160%);
+    transition:
+      background-color 1.2s ease,
+      border-color 1.2s ease;
+  }
+  .glass-thin {
+    --glass-blur: 12px;
+    background: rgb(var(--glass-tint) / calc(var(--glass-alpha) * 0.6));
+  }
+  .glass-thick {
+    --glass-blur: 40px;
+    background: rgb(var(--glass-tint) / calc(var(--glass-alpha) + 0.12));
+  }
+  .glass-sheen::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    border-radius: inherit;
+    pointer-events: none;
+    opacity: var(--sheen, 0);
+    transition: opacity 0.3s ease;
+    background: radial-gradient(
+      220px circle at var(--mx, 50%) var(--my, 0%),
+      rgb(255 255 255 / 0.35),
+      transparent 70%
+    );
+  }
+
+  /* 低画质或浏览器不支持 backdrop-filter：关闭模糊，用更不透明的纯色保证文字可读 */
+  [data-quality='low'] :is(.glass, .glass-thin, .glass-thick) {
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+    background: var(--glass-solid);
+  }
+  [data-quality='low'] .glass-thick {
+    background: var(--glass-solid-thick);
+  }
+  @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+    .glass,
+    .glass-thin {
+      background: var(--glass-solid);
+    }
+    .glass-thick {
+      background: var(--glass-solid-thick);
+    }
+  }
+
+  .field {
+    @apply w-full rounded-2xl px-4 py-3 text-base text-fg placeholder:text-fg-muted;
+    background: var(--field-bg);
+    border: 1px solid var(--glass-border);
+    transition:
+      border-color 0.2s ease,
+      background-color 0.2s ease;
+  }
+  .field:focus {
+    outline: none;
+    border-color: var(--accent);
+  }
+}
+
+@utility pb-safe {
+  padding-bottom: env(safe-area-inset-bottom);
+}
+@utility pt-safe {
+  padding-top: env(safe-area-inset-top);
+}
+
+@keyframes drift {
+  0%,
+  100% {
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+  50% {
+    transform: translate3d(var(--dx, 6vw), var(--dy, -4vh), 0) scale(1.15);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

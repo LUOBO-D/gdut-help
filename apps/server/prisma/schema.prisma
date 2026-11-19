@@ -1,0 +1,207 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum UserRole {
+  user
+  admin
+}
+
+enum UserStatus {
+  normal
+  banned
+}
+
+model User {
+  id         String     @id @default(uuid()) @db.Uuid
+  email      String     @unique
+  /// 公开发布后用于实名，自用阶段为空
+  phone      String?    @unique
+  nickname   String
+  avatarUrl  String?    @map("avatar_url")
+  role       UserRole   @default(user)
+  /// 0 新用户 / 1 普通 / 2 可信（见 docs/03-backend.md 4.5）
+  trustLevel Int        @default(0) @map("trust_level") @db.SmallInt
+  status     UserStatus @default(normal)
+  /// 所在校区 ID，取值见 packages/shared/src/gdut.ts
+  campusId      String?    @map("campus_id")
+  /// 提醒是否同时发邮件（安卓上浏览器推送不可靠，邮件是保底渠道）
+  remindByEmail Boolean    @default(true) @map("remind_by_email")
+  createdAt  DateTime   @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt  DateTime   @updatedAt @map("updated_at") @db.Timestamptz
+
+  refreshTokens     RefreshToken[]
+  courses           Course[]
+  todos             Todo[]
+  reminders         Reminder[]
+  notifications     Notification[]
+  pushSubscriptions PushSubscription[]
+
+  @@map("users")
+}
+
+/// 邮箱验证码。只保存 HMAC 摘要，不保存明文。
+model EmailCode {
+  id         String    @id @default(uuid()) @db.Uuid
+  email      String
+  codeHash   String    @map("code_hash")
+  ip         String?
+  attempts   Int       @default(0) @db.SmallInt
+  expiresAt  DateTime  @map("expires_at") @db.Timestamptz
+  consumedAt DateTime? @map("consumed_at") @db.Timestamptz
+  createdAt  DateTime  @default(now()) @map("created_at") @db.Timestamptz
+
+  @@index([email, createdAt])
+  @@index([ip, createdAt])
+  @@map("email_codes")
+}
+
+/// 刷新令牌。只保存 SHA-256 摘要；每次刷新都轮换，旧令牌被再次使用时吊销该用户全部令牌。
+model RefreshToken {
+  id         String    @id @default(uuid()) @db.Uuid
+  userId     String    @map("user_id") @db.Uuid
+  tokenHash  String    @unique @map("token_hash")
+  userAgent  String?   @map("user_agent")
+  expiresAt  DateTime  @map("expires_at") @db.Timestamptz
+  revokedAt  DateTime? @map("revoked_at") @db.Timestamptz
+  createdAt  DateTime  @default(now()) @map("created_at") @db.Timestamptz
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("refresh_tokens")
+}
+
+/// 学期。全校统一，由管理员维护；同一时间只有一个 isCurrent
+model Semester {
+  id         String   @id @default(uuid()) @db.Uuid
+  name       String
+  /// 第 1 周的周一
+  startDate  DateTime @map("start_date") @db.Date
+  totalWeeks Int      @map("total_weeks") @db.SmallInt
+  isCurrent  Boolean  @default(false) @map("is_current")
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt  DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  courses Course[]
+
+  @@map("semesters")
+}
+
+model Course {
+  id         String   @id @default(uuid()) @db.Uuid
+  userId     String   @map("user_id") @db.Uuid
+  semesterId String   @map("semester_id") @db.Uuid
+  name       String
+  teacher    String?
+  location   String?
+  color      String
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt  DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  user     User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  semester Semester     @relation(fields: [semesterId], references: [id], onDelete: Cascade)
+  slots    CourseSlot[]
+
+  @@index([userId, semesterId])
+  @@map("courses")
+}
+
+/// 一门课的一个上课时间段：星期几、第几节到第几节、哪些周
+model CourseSlot {
+  id          String  @id @default(uuid()) @db.Uuid
+  courseId    String  @map("course_id") @db.Uuid
+  weekday     Int     @db.SmallInt
+  periodStart Int     @map("period_start") @db.SmallInt
+  periodEnd   Int     @map("period_end") @db.SmallInt
+  weeks       Int[]   @db.SmallInt
+  /// 不同时间段可能在不同教室；为空时用课程的 location
+  location    String?
+
+  course Course @relation(fields: [courseId], references: [id], onDelete: Cascade)
+
+  @@index([courseId])
+  @@map("course_slots")
+}
+
+model Todo {
+  id          String    @id @default(uuid()) @db.Uuid
+  userId      String    @map("user_id") @db.Uuid
+  title       String
+  note        String?
+  dueAt       DateTime? @map("due_at") @db.Timestamptz
+  /// 1 最高 … 4 最低
+  priority    Int       @default(3) @db.SmallInt
+  completedAt DateTime? @map("completed_at") @db.Timestamptz
+  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt   DateTime  @updatedAt @map("updated_at") @db.Timestamptz
+
+  user      User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  reminders Reminder[]
+
+  @@index([userId, completedAt])
+  @@map("todos")
+}
+
+enum ReminderStatus {
+  pending
+  sent
+  cancelled
+}
+
+model Reminder {
+  id            String         @id @default(uuid()) @db.Uuid
+  todoId        String         @map("todo_id") @db.Uuid
+  userId        String         @map("user_id") @db.Uuid
+  /// 「截止前 N 分钟」类型的提醒；为空表示指定了具体时间
+  offsetMinutes Int?           @map("offset_minutes")
+  fireAt        DateTime       @map("fire_at") @db.Timestamptz
+  status        ReminderStatus @default(pending)
+  sentAt        DateTime?      @map("sent_at") @db.Timestamptz
+  createdAt     DateTime       @default(now()) @map("created_at") @db.Timestamptz
+
+  todo Todo @relation(fields: [todoId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([status, fireAt])
+  @@index([todoId])
+  @@map("reminders")
+}
+
+/// 站内通知：所有提醒都会写一条，打开应用时可以看到
+model Notification {
+  id        String    @id @default(uuid()) @db.Uuid
+  userId    String    @map("user_id") @db.Uuid
+  title     String
+  body      String
+  link      String?
+  readAt    DateTime? @map("read_at") @db.Timestamptz
+  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@map("notifications")
+}
+
+/// 浏览器推送订阅（Web Push）。推送服务返回 404/410 时自动删除
+model PushSubscription {
+  id         String   @id @default(uuid()) @db.Uuid
+  userId     String   @map("user_id") @db.Uuid
+  endpoint   String   @unique
+  p256dh     String
+  auth       String
+  userAgent  String?  @map("user_agent")
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz
+  lastUsedAt DateTime @default(now()) @map("last_used_at") @db.Timestamptz
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("push_subscriptions")
+}

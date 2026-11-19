@@ -1,0 +1,6 @@
+# 统一用 LF 换行，避免 Windows 上提交后整文件变更
+* text=auto eol=lf
+*.png binary
+*.ico binary
+pnpm-lock.yaml linguist-generated=true -diff
+apps/server/prisma/migrations/** linguist-generated=true
