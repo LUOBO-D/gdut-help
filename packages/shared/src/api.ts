@@ -20,3 +20,7 @@ export const ErrorCode = {
 } as const;
 
 export type ErrorCode = (typeof ErrorCode)[keyof typeof ErrorCode];
+
+/** App 发请求时带上 `X-Client: native`，服务端改为在响应体里返回 refresh token（见 AuthSession.refreshToken） */
+export const NATIVE_CLIENT_HEADER = 'x-client';
+export const NATIVE_CLIENT_VALUE = 'native';

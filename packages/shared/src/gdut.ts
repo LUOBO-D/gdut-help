@@ -2,8 +2,7 @@
  * 广东工业大学校区与作息时间。
  *
  * 坐标只用于查天气，精确到校区附近即可。
- * ⚠️ 作息时间是常见的 12 节模板，尚未与学校官方作息表核对（PERIODS_VERIFIED = false）。
- *    拿到官方作息后改这里，并把 PERIODS_VERIFIED 设为 true，界面上的「待核实」提示会消失。
+ * 作息时间已与大学城校区的官方 12 节作息核对。学校调整作息时改 TEMPLATE_PERIODS。
  */
 
 export interface Campus {
@@ -17,9 +16,10 @@ export interface Campus {
 
 export const CAMPUSES: Campus[] = [
   { id: 'hemc', name: '大学城校区', area: '广州·番禺', lat: 23.04, lng: 113.4 },
-  { id: 'dongfeng', name: '东风路校区', area: '广州·越秀', lat: 23.13, lng: 113.3 },
-  { id: 'longdong', name: '龙洞校区', area: '广州·天河', lat: 23.2, lng: 113.37 },
-  { id: 'jieyang', name: '揭阳校区', area: '揭阳', lat: 23.55, lng: 116.37 },
+  // 目前只做大学城校区。其他校区以后需要时取消注释即可，id 不要改
+  // { id: 'dongfeng', name: '东风路校区', area: '广州·越秀', lat: 23.13, lng: 113.3 },
+  // { id: 'longdong', name: '龙洞校区', area: '广州·天河', lat: 23.2, lng: 113.37 },
+  // { id: 'jieyang', name: '揭阳校区', area: '揭阳', lat: 23.55, lng: 116.37 },
 ];
 
 export const DEFAULT_CAMPUS_ID = 'hemc';
@@ -36,7 +36,7 @@ export interface ClassPeriod {
   end: string;
 }
 
-export const PERIODS_VERIFIED = false;
+export const PERIODS_VERIFIED = true;
 
 const TEMPLATE_PERIODS: ClassPeriod[] = [
   { no: 1, start: '08:30', end: '09:15' },

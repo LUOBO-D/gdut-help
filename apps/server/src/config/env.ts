@@ -41,6 +41,16 @@ const envSchema = z
     VAPID_PUBLIC_KEY: z.string().default(''),
     VAPID_PRIVATE_KEY: z.string().default(''),
     VAPID_SUBJECT: z.string().default('mailto:admin@gduthelp.local'),
+    /** 允许跨域访问 API 的来源，逗号分隔。安卓 App 的页面来源是 https://localhost */
+    CORS_ORIGINS: z
+      .string()
+      .default('')
+      .transform((v) =>
+        v
+          .split(',')
+          .map((o) => o.trim())
+          .filter(Boolean),
+      ),
     /** 提醒扫描间隔（秒） */
     REMINDER_POLL_SECONDS: z.coerce.number().int().min(5).max(120).default(15),
   })

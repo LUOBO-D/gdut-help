@@ -1,7 +1,8 @@
-import { ErrorCode, type ApiResponse, type AuthSession } from '@gduthelp/shared';
+import { ErrorCode, NATIVE_CLIENT_HEADER, NATIVE_CLIENT_VALUE, type ApiResponse, type AuthSession } from '@gduthelp/shared';
 import { useAuth } from './auth-store';
+import { getRefreshToken, setRefreshToken } from './native-token';
+import { API_BASE, isNative } from './platform';
 
-const BASE = '/api/v1';
 export const NETWORK_ERROR = 'NETWORK_ERROR';
 /** access token 剩余不足这么久时，先刷新再发请求 */
 const REFRESH_AHEAD_MS = 30_000;
@@ -49,19 +50,22 @@ async function send<T>(path: string, { method = 'GET', body, auth = true, signal
   if (body !== undefined) headers['Content-Type'] = 'application/json';
   const token = useAuth.getState().accessToken;
   if (auth && token) headers.Authorization = `Bearer ${token}`;
+  if (isNative) headers[NATIVE_CLIENT_HEADER] = NATIVE_CLIENT_VALUE;
 
   let res: Response;
   try {
-    res = await fetch(BASE + path, {
+    res = await fetch(API_BASE + path, {
       method,
       headers,
       body: body === undefined ? undefined : JSON.stringify(body),
-      credentials: 'same-origin',
+      // App 不用 Cookie（refresh token 放在请求体里），跨域请求也就不需要带凭据
+      credentials: isNative ? 'omit' : 'same-origin',
       signal,
     });
   } catch (err) {
     if (err instanceof DOMException && err.name === 'AbortError') throw err;
-    throw new ApiError(NETWORK_ERROR, '网络连接失败，请检查网络', 0);
+    // App 通过 Tailscale 连到电脑上的服务端，连不上时多半是手机上的 Tailscale 没开
+    throw new ApiError(NETWORK_ERROR, isNative ? '连不上服务器，请确认手机上的 Tailscale 已连接' : '网络连接失败，请检查网络', 0);
   }
 
   const json = (await res.json().catch(() => null)) as ApiResponse<T> | null;
@@ -72,8 +76,14 @@ async function send<T>(path: string, { method = 'GET', body, auth = true, signal
 
 let inflight: Promise<boolean> | null = null;
 
+/** 登录或刷新成功后保存会话。App 端同时保存响应体里的 refresh token */
+export async function saveSession(session: AuthSession): Promise<void> {
+  if (isNative) await setRefreshToken(session.refreshToken);
+  useAuth.getState().setSession(session);
+}
+
 /**
- * 用 Cookie 中的刷新令牌换新的 access token。
+ * 用刷新令牌换新的 access token（网页端在 Cookie 里，App 端在本地存储里）。
  * 同一页面内合并并发调用；多个标签页之间用 Web Locks 串行，避免同一个刷新令牌被同时使用。
  */
 export function refreshSession(): Promise<boolean> {
@@ -90,11 +100,17 @@ function runExclusive<T>(fn: () => Promise<T>): Promise<T> {
 async function doRefresh(): Promise<boolean> {
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
-      const session = await send<AuthSession>('/auth/refresh', { method: 'POST', auth: false });
-      useAuth.getState().setSession(session);
+      const refreshToken = isNative ? await getRefreshToken() : null;
+      if (isNative && !refreshToken) break;
+      const session = await send<AuthSession>('/auth/refresh', {
+        method: 'POST',
+        auth: false,
+        body: isNative ? { refreshToken } : undefined,
+      });
+      await saveSession(session);
       return true;
     } catch (err) {
-      // 409：另一个请求刚轮换了令牌，稍等后用新 Cookie 重试
+      // 409：另一个请求刚轮换了令牌，稍等后用新令牌重试
       if (err instanceof ApiError && err.status === 409 && attempt === 0) {
         await new Promise((r) => setTimeout(r, 300));
         continue;
@@ -104,15 +120,19 @@ async function doRefresh(): Promise<boolean> {
       break;
     }
   }
+  await setRefreshToken(null);
   useAuth.getState().clear();
   return false;
 }
 
 export async function logout(): Promise<void> {
   try {
-    await send<null>('/auth/logout', { method: 'POST', auth: false });
+    const body = isNative ? { refreshToken: await getRefreshToken() } : undefined;
+    await send<null>('/auth/logout', { method: 'POST', auth: false, body });
   } finally {
+    await setRefreshToken(null);
     useAuth.getState().clear();
+    if (isNative) await import('./local-reminders').then((m) => m.clearLocalReminders()).catch(() => undefined);
     const { clearQueryCache } = await import('./query-client');
     await clearQueryCache();
   }

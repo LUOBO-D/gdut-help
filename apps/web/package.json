@@ -9,9 +9,14 @@
     "typecheck": "tsc -b",
     "lint": "oxlint src",
     "test": "vitest run --passWithNoTests",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "build:android": "tsc -b && vite build --mode android && cap sync android",
+    "android:run": "pnpm build:android && cap run android"
   },
   "dependencies": {
+    "@capacitor/core": "^8.6.2",
+    "@capacitor/local-notifications": "^8.3.1",
+    "@capacitor/preferences": "^8.0.1",
     "@gduthelp/shared": "workspace:*",
     "@react-three/fiber": "^9.8.2",
     "@tanstack/query-async-storage-persister": "^5.108.0",
@@ -32,6 +37,8 @@
     "zustand": "^5.1.0"
   },
   "devDependencies": {
+    "@capacitor/android": "^8.6.2",
+    "@capacitor/cli": "^8.6.2",
     "@tailwindcss/vite": "^4.3.5",
     "@types/node": "^24.19.2",
     "@types/react": "^19.3.0",

@@ -5,11 +5,17 @@ import { createRoot } from 'react-dom/client';
 import { RouterProvider } from 'react-router';
 import { registerSW } from 'virtual:pwa-register';
 import { router } from './app/router';
+import { isNative } from './lib/platform';
 import { CACHE_BUSTER, persister, queryClient } from './lib/query-client';
 import './styles/index.css';
 
-// 注册 Service Worker：离线打开、接收推送
-registerSW({ immediate: true });
+if (isNative) {
+  // App 的页面文件已经打包在安装包里，不需要 Service Worker；提醒用本地通知
+  void import('./lib/local-reminders').then((m) => m.initLocalReminders(queryClient, router));
+} else {
+  // 注册 Service Worker：离线打开、接收推送
+  registerSW({ immediate: true });
+}
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>

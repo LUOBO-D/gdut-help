@@ -6,7 +6,7 @@ import { Navigate, useLocation, useNavigate } from 'react-router';
 import { Button } from '../../components/Button';
 import { GlassCard } from '../../components/GlassCard';
 import { ArrowLeftIcon, MailIcon } from '../../components/icons';
-import { api, ApiError } from '../../lib/api';
+import { api, ApiError, saveSession } from '../../lib/api';
 import { useAuth } from '../../lib/auth-store';
 import { spring } from '../../motion/presets';
 import { CodeInput } from './CodeInput';
@@ -15,7 +15,6 @@ type Step = 'email' | 'code';
 
 export function LoginPage() {
   const status = useAuth((s) => s.status);
-  const setSession = useAuth((s) => s.setSession);
   const navigate = useNavigate();
   const from = (useLocation().state as { from?: string } | null)?.from ?? '/';
 
@@ -46,8 +45,8 @@ export function LoginPage() {
   const login = useMutation({
     mutationFn: (input: { email: string; code: string }) =>
       api<AuthSession>('/auth/login', { method: 'POST', body: input, auth: false }),
-    onSuccess: (session) => {
-      setSession(session);
+    onSuccess: async (session) => {
+      await saveSession(session);
       navigate(from, { replace: true });
     },
     onError: (err) => {

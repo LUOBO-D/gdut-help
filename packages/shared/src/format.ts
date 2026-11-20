@@ -32,3 +32,14 @@ export function formatRemaining(due: Date, now: Date): string {
   const mins = (due.getTime() - now.getTime()) / 60_000;
   return mins >= 0 ? `还有 ${formatDuration(mins)}` : `已超时 ${formatDuration(mins)}`;
 }
+/**
+ * 待办提醒的正文。服务端发提醒和 App 写本地通知共用。
+ * lateMinutes > 5 时注明这条提醒迟到了（服务停机期间错过的提醒会在恢复后补发）
+ */
+export function reminderBody(dueAt: Date | null, now: Date, lateMinutes = 0): string {
+  const parts: string[] = [];
+  if (dueAt) parts.push(`截止 ${formatWhen(dueAt, now)}，${formatRemaining(dueAt, now)}`);
+  else parts.push('提醒时间到了');
+  if (lateMinutes > 5) parts.push(`（这条提醒晚了 ${lateMinutes} 分钟）`);
+  return parts.join('');
+}

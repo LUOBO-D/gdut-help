@@ -14,6 +14,11 @@ async function bootstrap() {
   app.set('trust proxy', 'loopback');
   app.disable('x-powered-by');
   app.setGlobalPrefix('api/v1');
+  // 网页和 API 同源，不需要跨域。只有安卓 App（页面来自 https://localhost）需要。
+  // App 用 Authorization 头和请求体里的 refresh token，不用 Cookie，所以不开 credentials
+  if (env.CORS_ORIGINS.length) {
+    app.enableCors({ origin: env.CORS_ORIGINS, allowedHeaders: ['Authorization', 'Content-Type', 'Accept', 'X-Client'], maxAge: 600 });
+  }
   app.useGlobalPipes(new StandardSchemaValidationPipe());
   app.useGlobalInterceptors(new ResponseInterceptor());
   app.useGlobalFilters(new HttpExceptionFilter(app.get(HttpAdapterHost)));

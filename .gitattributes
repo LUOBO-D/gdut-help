@@ -4,3 +4,5 @@
 *.ico binary
 pnpm-lock.yaml linguist-generated=true -diff
 apps/server/prisma/migrations/** linguist-generated=true
+# Windows 批处理必须用 CRLF
+*.bat text eol=crlf
