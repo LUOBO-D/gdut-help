@@ -44,3 +44,28 @@ export const courseInputSchema = z.object({
 export type CourseInput = z.input<typeof courseInputSchema>;
 export type CourseSlot = z.infer<typeof slotSchema>;
 
+
+/** 导入课表的请求体：前端解析、预览后提交的课程列表 */
+export const timetableImportSchema = z.object({
+  courses: z
+    .array(
+      z.object({
+        importKey: z.string().min(1).max(80),
+        name: z.string().trim().min(1).max(30),
+        teacher: z.string().trim().max(20).nullable(),
+        location: z.string().trim().max(30).nullable(),
+        slots: z.array(slotSchema).min(1).max(10),
+      }),
+    )
+    .max(60),
+  /** 以前导入、这次没有的课是否删除 */
+  removeMissing: z.boolean().default(true),
+});
+export type TimetableImportRequest = z.input<typeof timetableImportSchema>;
+
+export interface TimetableImportResult {
+  added: number;
+  changed: number;
+  removed: number;
+  unchanged: number;
+}

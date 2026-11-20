@@ -92,6 +92,11 @@ function CourseForm({ draft, semester, onDone }: { draft: CourseDraft; semester:
 
   return (
     <div className="space-y-4 pb-2">
+      {c?.source === 'import' && (
+        <p className="glass-thin rounded-xl p-2 text-xs text-fg-muted">
+          这门课来自教务系统。在这里改的时间和教室，下次重新导入时会按教务系统的数据覆盖；颜色会保留。
+        </p>
+      )}
       <Field label="课程名">
         <input className="field" value={name} onChange={(e) => setName(e.target.value)} maxLength={30} placeholder="如：高等数学" autoFocus />
       </Field>

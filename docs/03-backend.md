@@ -84,7 +84,7 @@ RESTful，前缀 `/api/v1`，统一返回 `{ code, data, message }`。列表接�
 | weather | `GET /weather/today?lat=&lng=` 或 `?campusId=` | 实时 + 逐小时 + 预警 |
 | timetable | `GET /timetable/today`、`GET /timetable/week?week=` | |
 | | `CRUD /semesters`、`CRUD /courses` | |
-| | `POST /timetable/import/file`、`POST /timetable/import/jw` | 导入 |
+| | `POST /timetable/import` | 导入教务系统课表：前端解析粘贴的 JSON（`packages/shared/src/timetable-import.ts`）并预览差异，确认后提交课程列表。按「课程名 + 老师」匹配以前导入的课，手动添加的课不受影响 |
 | todo | `CRUD /todos`、`POST /todos/:id/complete` | |
 | | `GET /todos/:id/reminders`、`PUT /todos/:id/reminders` | |
 | recommend | `PUT /mood/today` | 记录心情 |

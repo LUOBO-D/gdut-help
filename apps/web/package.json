@@ -15,6 +15,7 @@
   },
   "dependencies": {
     "@capacitor/core": "^8.6.2",
+    "@capacitor/inappbrowser": "^4.1.0",
     "@capacitor/local-notifications": "^8.3.1",
     "@capacitor/preferences": "^8.0.1",
     "@gduthelp/shared": "workspace:*",

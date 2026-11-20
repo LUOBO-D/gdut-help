@@ -2,7 +2,9 @@ import { Body, Controller, Delete, Get, HttpCode, Param, Post, Put } from '@nest
 import {
   courseInputSchema,
   semesterInputSchema,
+  timetableImportSchema,
   type Course,
+  type TimetableImportResult,
   type Semester,
   type SemesterInput,
   type TimetableData,
@@ -27,6 +29,16 @@ export class TimetableController {
   @Post('courses')
   create(@CurrentUser() user: AuthUser, @Body({ schema: courseInputSchema }) body: CourseData): Promise<Course> {
     return this.timetable.create(user.id, body);
+  }
+
+  /** 导入教务系统课表（前端解析、预览确认后提交） */
+  @Post('timetable/import')
+  @HttpCode(200)
+  importCourses(
+    @CurrentUser() user: AuthUser,
+    @Body({ schema: timetableImportSchema }) body: z.output<typeof timetableImportSchema>,
+  ): Promise<TimetableImportResult> {
+    return this.timetable.importCourses(user.id, body);
   }
 
   @Put('courses/:id')

@@ -118,6 +118,19 @@ Vite 已允许 `.ts.net` 域名访问（`apps/web/vite.config.ts`）。查看：
 - Gradle 不读终端里的 `http_proxy`。需要代理时写进 `~/.gradle/gradle.properties`（`systemProp.https.proxyHost` 等）。
 - 复制 `apps/web/.env.android.example` 为 `apps/web/.env.android.local`，填 `tailscale serve status` 里的地址。
 
+### 从教务系统读取课表
+
+课表 → 导入 → 「从教务系统读取课表」（只在 App 里有）：
+
+1. 用应用内浏览器（`@capacitor/inappbrowser`，`isIsolated: false`）打开学校统一认证页，用户自己登录。只允许打开 `gdut.edu.cn` 和 QQ / 微信登录的页面。
+2. 登录后用 `CapacitorHttp` 在手机上请求 `jxfw.gdut.edu.cn`（共用 WebView 的 Cookie，没有跨域限制）：
+   - `xsgrkbcx!getXsgrbkList.action`：学期下拉框，取默认选中的学期代码（如 `202601` = 2026 秋季）
+   - `xsgrkbcx!getKbRq.action?xnxqdm=<学期代码>`：整学期课表，`[每周一条的记录, []]`
+   - 同一接口加 `&zc=1`：第二个数组是第 1 周每天的日期，用来核对开学日期
+3. 在手机上解析（`packages/shared/src/timetable-import.ts`），预览差异，确认后提交 `POST /timetable/import`。服务端只收到整理好的课程。
+
+App 每次启动会清掉会话 Cookie，教务系统的登录状态随之失效；失效时接口返回登录页，代码会重新弹出登录页。代码在 `apps/web/src/lib/jw.ts`。
+
 ### 打包和安装
 
 手机开启 USB 调试并连上电脑（`adb devices` 显示 `device`）：

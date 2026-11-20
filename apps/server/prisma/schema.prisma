@@ -101,6 +101,10 @@ model Course {
   teacher    String?
   location   String?
   color      String
+  /// manual：自己添加；import：从教务系统导入。重新导入只会改动 import 的课程
+  source     CourseSource @default(manual)
+  /// 导入课程的匹配键（课程名 + 老师），重新导入时据此判断是同一门课
+  importKey  String?  @map("import_key")
   createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz
   updatedAt  DateTime @updatedAt @map("updated_at") @db.Timestamptz
 
@@ -110,6 +114,11 @@ model Course {
 
   @@index([userId, semesterId])
   @@map("courses")
+}
+
+enum CourseSource {
+  manual
+  import
 }
 
 /// 一门课的一个上课时间段：星期几、第几节到第几节、哪些周

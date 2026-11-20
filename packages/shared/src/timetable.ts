@@ -17,6 +17,9 @@ export interface Course {
   teacher: string | null;
   location: string | null;
   color: string;
+  /** manual：自己添加；import：从教务系统导入 */
+  source: 'manual' | 'import';
+  importKey: string | null;
   slots: (CourseSlot & { id: string })[];
 }
 
