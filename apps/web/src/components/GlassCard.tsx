@@ -35,7 +35,7 @@ export function GlassCard({ variant = 'default', interactive = false, className 
     : {};
   return (
     <motion.div
-      className={`${VARIANT_CLASS[variant]} glass-sheen ${interactive ? 'cursor-pointer select-none' : ''} ${className}`}
+      className={`${VARIANT_CLASS[variant]} glass-sheen ${interactive ? 'glass-hover cursor-pointer select-none' : ''} ${className}`}
       {...interactiveProps}
       {...rest}
     />

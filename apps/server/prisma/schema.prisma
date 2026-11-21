@@ -32,15 +32,27 @@ model User {
   campusId      String?    @map("campus_id")
   /// 提醒是否同时发邮件（安卓上浏览器推送不可靠，邮件是保底渠道）
   remindByEmail Boolean    @default(true) @map("remind_by_email")
+  /// 是否开启每天饭点（11:30 / 17:20）自动推送餐食推荐
+  remindMeal    Boolean    @default(false) @map("remind_meal")
   createdAt  DateTime   @default(now()) @map("created_at") @db.Timestamptz
   updatedAt  DateTime   @updatedAt @map("updated_at") @db.Timestamptz
 
-  refreshTokens     RefreshToken[]
-  courses           Course[]
-  todos             Todo[]
-  reminders         Reminder[]
-  notifications     Notification[]
-  pushSubscriptions PushSubscription[]
+  refreshTokens         RefreshToken[]
+  courses               Course[]
+  todos                 Todo[]
+  reminders             Reminder[]
+  notifications         Notification[]
+  pushSubscriptions     PushSubscription[]
+  preference            UserPreference?
+  submittedMerchants    Merchant[]
+  merchantConfirmations MerchantConfirmation[]
+  merchantEdits         MerchantEdit[]
+  submittedDishes       Dish[]
+  moodLogs              MoodLog[]
+  mealFeedbacks         MealFeedback[]
+  reviews               Review[]
+  reviewLikes           ReviewLike[]
+  mealNotifyLogs        MealNotifyLog[]
 
   @@map("users")
 }
@@ -213,4 +225,256 @@ model PushSubscription {
 
   @@index([userId])
   @@map("push_subscriptions")
+}
+
+/// 用户饮食偏好（口味、忌口、每餐预算）
+model UserPreference {
+  userId    String   @id @map("user_id") @db.Uuid
+  tastes    String[] @default([])
+  dislikes  String[] @default([])
+  budgetMin Int?     @map("budget_min") @db.SmallInt
+  budgetMax Int?     @map("budget_max") @db.SmallInt
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("user_preferences")
+}
+
+enum MerchantCategory {
+  canteen
+  restaurant
+  noodle
+  fastfood
+  drink
+  snack
+  dessert
+  hotpot
+}
+
+enum MerchantStatus {
+  pending
+  approved
+  rejected
+  closed
+}
+
+enum MerchantConfirmKind {
+  exists
+  closed
+}
+
+enum MerchantEditStatus {
+  pending
+  applied
+  rejected
+}
+
+enum DishStatus {
+  visible
+  hidden
+}
+
+enum MoodType {
+  happy
+  calm
+  tired
+  anxious
+  down
+  treat
+}
+
+enum MealType {
+  lunch
+  dinner
+}
+
+enum MealFeedbackAction {
+  accepted
+  skipped
+  disliked
+}
+
+/// 商家（食堂档口、校外餐厅、奶茶店等），全部由用户提交
+model Merchant {
+  id           String           @id @default(uuid()) @db.Uuid
+  name         String
+  category     MerchantCategory
+  campusId     String           @map("campus_id")
+  locationText String           @map("location_text")
+  /// 从教学区步行约需分钟数（自用阶段无需地图选点即可按距离打分）
+  walkMinutes  Int?             @map("walk_minutes") @db.SmallInt
+  lat          Float?
+  lng          Float?
+  /// 人均价格（元）
+  priceAvg     Int              @map("price_avg") @db.SmallInt
+  tags         String[]         @default([])
+  /// 营业信息，如 { meals: ["lunch", "dinner"], text: "10:30-21:00" }
+  openHours    Json?            @map("open_hours")
+  submittedBy  String           @map("submitted_by") @db.Uuid
+  confirmCount Int              @default(0) @map("confirm_count") @db.SmallInt
+  status       MerchantStatus   @default(approved)
+  ratingAvg    Float            @default(0) @map("rating_avg")
+  ratingCount  Int              @default(0) @map("rating_count")
+  bayesScore   Float            @default(0) @map("bayes_score")
+  createdAt    DateTime         @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt    DateTime         @updatedAt @map("updated_at") @db.Timestamptz
+
+  submitter     User                   @relation(fields: [submittedBy], references: [id], onDelete: Cascade)
+  confirmations MerchantConfirmation[]
+  edits         MerchantEdit[]
+  dishes        Dish[]
+  feedbacks     MealFeedback[]
+  reviews       Review[]
+
+  @@index([campusId, status])
+  @@index([submittedBy])
+  @@map("merchants")
+}
+
+/// 商家存在/已关店确认（数据表在 S3 建好，多人确认逻辑在公开版 P2 启用）
+model MerchantConfirmation {
+  id         String              @id @default(uuid()) @db.Uuid
+  merchantId String              @map("merchant_id") @db.Uuid
+  userId     String              @map("user_id") @db.Uuid
+  kind       MerchantConfirmKind
+  createdAt  DateTime            @default(now()) @map("created_at") @db.Timestamptz
+
+  merchant Merchant @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([merchantId, userId, kind])
+  @@map("merchant_confirmations")
+}
+
+/// 商家纠错记录（P2 公开版启用多人确认/审核流程）
+model MerchantEdit {
+  id           String             @id @default(uuid()) @db.Uuid
+  merchantId   String             @map("merchant_id") @db.Uuid
+  userId       String             @map("user_id") @db.Uuid
+  changes      Json
+  confirmCount Int                @default(0) @map("confirm_count") @db.SmallInt
+  status       MerchantEditStatus @default(pending)
+  createdAt    DateTime           @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt    DateTime           @updatedAt @map("updated_at") @db.Timestamptz
+
+  merchant Merchant @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([merchantId, status])
+  @@map("merchant_edits")
+}
+
+/// 商家招牌菜品（可选补充，有菜品时推荐理由会更具体）
+model Dish {
+  id          String     @id @default(uuid()) @db.Uuid
+  merchantId  String     @map("merchant_id") @db.Uuid
+  name        String
+  price       Int?       @db.SmallInt
+  tags        String[]   @default([])
+  submittedBy String     @map("submitted_by") @db.Uuid
+  status      DishStatus @default(visible)
+  createdAt   DateTime   @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt   DateTime   @updatedAt @map("updated_at") @db.Timestamptz
+
+  merchant  Merchant @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+  submitter User     @relation(fields: [submittedBy], references: [id], onDelete: Cascade)
+
+  @@index([merchantId, status])
+  @@map("dishes")
+}
+
+/// 每日心情记录（每人每天一条，重复提交覆盖）
+model MoodLog {
+  id        String   @id @default(uuid()) @db.Uuid
+  userId    String   @map("user_id") @db.Uuid
+  /// 北京日期 'YYYY-MM-DD'
+  date      String
+  mood      MoodType
+  note      String?
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, date])
+  @@map("mood_logs")
+}
+
+/// 餐食推荐反馈（接受 / 换一个 / 不想吃），用于去重与偏好学习
+model MealFeedback {
+  id         String             @id @default(uuid()) @db.Uuid
+  userId     String             @map("user_id") @db.Uuid
+  merchantId String             @map("merchant_id") @db.Uuid
+  meal       MealType
+  action     MealFeedbackAction
+  /// 北京日期 'YYYY-MM-DD'
+  date       String
+  createdAt  DateTime           @default(now()) @map("created_at") @db.Timestamptz
+
+  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  merchant Merchant @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+
+  @@index([userId, date, meal])
+  @@index([userId, merchantId])
+  @@map("meal_feedback")
+}
+
+enum ReviewStatus {
+  visible
+  hidden
+  pending
+}
+
+/// 商家评分与个人评价（每人每商家一条主评价，修改即覆盖并重算贝叶斯分）
+model Review {
+  id           String       @id @default(uuid()) @db.Uuid
+  userId       String       @map("user_id") @db.Uuid
+  merchantId   String       @map("merchant_id") @db.Uuid
+  scoreTaste   Int          @map("score_taste") @db.SmallInt
+  scoreValue   Int          @map("score_value") @db.SmallInt
+  scoreEnv     Int          @map("score_env") @db.SmallInt
+  scoreSpeed   Int          @map("score_speed") @db.SmallInt
+  scoreOverall Int          @map("score_overall") @db.SmallInt
+  content      String       @default("")
+  images       String[]     @default([])
+  likeCount    Int          @default(0) @map("like_count")
+  status       ReviewStatus @default(visible)
+  createdAt    DateTime     @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt    DateTime     @updatedAt @map("updated_at") @db.Timestamptz
+
+  user     User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  merchant Merchant     @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+  likes    ReviewLike[]
+
+  @@unique([userId, merchantId])
+  @@index([merchantId, status, createdAt])
+  @@map("reviews")
+}
+
+model ReviewLike {
+  reviewId  String   @map("review_id") @db.Uuid
+  userId    String   @map("user_id") @db.Uuid
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  review Review @relation(fields: [reviewId], references: [id], onDelete: Cascade)
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([reviewId, userId])
+  @@map("review_likes")
+}
+
+/// 饭点推送幂等记录：保证每人每天每餐最多推送一次
+model MealNotifyLog {
+  id         String   @id @default(uuid()) @db.Uuid
+  userId     String   @map("user_id") @db.Uuid
+  date       String
+  meal       MealType
+  merchantId String   @map("merchant_id") @db.Uuid
+  sentAt     DateTime @default(now()) @map("sent_at") @db.Timestamptz
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, date, meal])
+  @@map("meal_notify_logs")
 }

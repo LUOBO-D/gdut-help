@@ -23,7 +23,10 @@ export class AuthGuard implements CanActivate {
     if (scheme !== 'Bearer' || !token) throw unauthorized();
 
     try {
-      const payload = await this.jwt.verifyAsync<AccessTokenPayload>(token);
+      const payload = await this.jwt.verifyAsync<AccessTokenPayload>(token, {
+        algorithms: ['HS256'],
+        issuer: 'gduthelp',
+      });
       req.user = { id: payload.sub, role: payload.role };
     } catch {
       throw unauthorized();

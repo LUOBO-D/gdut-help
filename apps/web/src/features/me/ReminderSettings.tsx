@@ -21,6 +21,7 @@ function describe(r: DeliveryResult): string {
 
 export function ReminderSettings() {
   const remindByEmail = useAuth((s) => s.user?.remindByEmail ?? true);
+  const remindMeal = useAuth((s) => s.user?.remindMeal ?? false);
   const email = useAuth((s) => s.user?.email);
   const update = useUpdateProfile();
   const [push, setPush] = useState<PushState | null>(null);
@@ -71,6 +72,12 @@ export function ReminderSettings() {
           }
           checked={remindByEmail}
           onChange={(v) => update.mutate({ remindByEmail: v })}
+        />
+        <Switch
+          label="饭点推荐推送"
+          description="每天午饭（11:30）与晚饭（17:20）前推送一条结合天气和课表的餐食推荐"
+          checked={remindMeal}
+          onChange={(v) => update.mutate({ remindMeal: v })}
         />
       </div>
       <Button variant="ghost" className="mt-3 w-full" loading={test.isPending} onClick={() => test.mutate()}>

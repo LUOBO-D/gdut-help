@@ -23,6 +23,9 @@
   --glass-solid: rgb(255 255 255 / 0.6);
   /* 底部栏、弹窗下面压着内容，需要更不透明 */
   --glass-solid-thick: rgb(255 255 255 / 0.97);
+  /* 卡片内部的柔和子底色与悬停态（自适应浅/深天气场景） */
+  --surface-subtle: rgb(255 255 255 / 0.24);
+  --surface-hover: rgb(255 255 255 / 0.36);
   color-scheme: light;
 }
 
@@ -51,6 +54,8 @@
   --danger: #ff8a80;
   --glass-solid: rgb(16 26 46 / 0.72);
   --glass-solid-thick: rgb(16 26 46 / 0.97);
+  --surface-subtle: rgb(255 255 255 / 0.08);
+  --surface-hover: rgb(255 255 255 / 0.14);
   color-scheme: dark;
 }
 [data-scene='rain'] {
@@ -185,6 +190,25 @@
   .field:focus {
     outline: none;
     border-color: var(--accent);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent);
+  }
+  .surface-subtle {
+    background: var(--surface-subtle);
+    transition: background-color 0.2s ease;
+  }
+  @media (hover: hover) {
+    .surface-subtle-hover:hover {
+      background: var(--surface-hover);
+    }
+    .glass-hover {
+      transition:
+        background-color 1.2s ease,
+        border-color 0.25s ease,
+        box-shadow 0.25s ease;
+    }
+    .glass-hover:hover {
+      border-color: var(--glass-highlight);
+    }
   }
 }
 
@@ -193,6 +217,12 @@
 }
 @utility pt-safe {
   padding-top: env(safe-area-inset-top);
+}
+@utility no-scrollbar {
+  scrollbar-width: none;
+  &::-webkit-scrollbar {
+    display: none;
+  }
 }
 
 @keyframes drift {

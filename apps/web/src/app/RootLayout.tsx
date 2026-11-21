@@ -3,6 +3,7 @@ import { Outlet, ScrollRestoration } from 'react-router';
 import { FpsMeter } from '../components/FpsMeter';
 import { OfflineBanner } from '../components/OfflineBanner';
 import { SkyBackground } from '../components/SkyBackground';
+import { ToastViewport } from '../components/Toast';
 import { refreshSession } from '../lib/api';
 import { useAuth } from '../lib/auth-store';
 import { useOnline } from '../lib/use-online';
@@ -34,6 +35,7 @@ export function RootLayout() {
       <OfflineBanner />
       {showFps && <FpsMeter />}
       <Outlet />
+      <ToastViewport />
       <ScrollRestoration />
     </>
   );

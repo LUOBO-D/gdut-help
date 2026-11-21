@@ -34,6 +34,7 @@ export interface UserProfile {
   role: UserRole;
   campusId: string | null;
   remindByEmail: boolean;
+  remindMeal: boolean;
   createdAt: string;
 }
 
@@ -42,6 +43,7 @@ export const updateProfileSchema = z
     nickname: z.string().trim().min(1, { error: '昵称不能为空' }).max(20, { error: '昵称最多 20 个字' }),
     campusId: z.string().refine((id) => CAMPUSES.some((c) => c.id === id), { error: '未知校区' }),
     remindByEmail: z.boolean(),
+    remindMeal: z.boolean(),
   })
   .partial();
 export type UpdateProfileRequest = z.infer<typeof updateProfileSchema>;

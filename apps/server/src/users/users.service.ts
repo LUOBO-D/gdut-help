@@ -13,6 +13,7 @@ export function toUserProfile(user: User): UserProfile {
     role: user.role,
     campusId: user.campusId,
     remindByEmail: user.remindByEmail,
+    remindMeal: user.remindMeal,
     createdAt: user.createdAt.toISOString(),
   };
 }

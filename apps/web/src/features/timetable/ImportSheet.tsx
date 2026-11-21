@@ -64,6 +64,7 @@ function ImportForm({ semester, courses, onDone }: { semester: Semester; courses
   const [removeMissing, setRemoveMissing] = useState(true);
   const [meta, setMeta] = useState<JwMeta | null>(null);
   const isAdmin = useAuth((s) => s.user?.role === 'admin');
+  const campusId = useAuth((s) => s.user?.campusId);
 
   const diff: ImportDiff | null = useMemo(() => (parsed?.courses.length ? diffImport(courses, parsed.courses) : null), [parsed, courses]);
   const maxWeek = useMemo(() => Math.max(0, ...(parsed?.courses.flatMap((c) => c.slots.flatMap((s) => s.weeks)) ?? [])), [parsed]);
@@ -83,7 +84,15 @@ function ImportForm({ semester, courses, onDone }: { semester: Semester; courses
 
   const parse = (value: string) => {
     setText(value);
-    setParsed(value.trim() ? parseTimetableImport(value) : null);
+    setParsed(
+      value.trim()
+        ? parseTimetableImport(value, {
+            semesterStartDate: semester.startDate,
+            totalWeeks: semester.totalWeeks,
+            campusId,
+          })
+        : null,
+    );
     submit.reset();
   };
 
@@ -135,15 +144,15 @@ function ImportForm({ semester, courses, onDone }: { semester: Semester; courses
 
       <textarea
         className="field min-h-32 font-mono text-xs"
-        placeholder="把课表数据（JSON）粘贴到这里"
+        placeholder="把课表数据（教务 JSON 或 .ics 日历内容）粘贴到这里"
         value={text}
         onChange={(e) => parse(e.target.value)}
         spellCheck={false}
         aria-label="课表数据"
       />
       <label className="block text-sm text-fg-muted">
-        或选择保存的文件：
-        <input type="file" accept=".json,.txt,application/json,text/plain" className="mt-1 block w-full text-sm" onChange={(e) => void readFile(e)} />
+        或选择保存的文件（支持 `.json` / `.ics`）：
+        <input type="file" accept=".json,.txt,.ics,application/json,text/plain,text/calendar" className="mt-1 block w-full text-sm" onChange={(e) => void readFile(e)} />
       </label>
 
       {parsed && (

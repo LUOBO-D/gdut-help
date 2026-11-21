@@ -8,7 +8,8 @@
  *
  * 不依赖 zod，课表页按需加载这个模块时不会拖慢首屏。
  */
-import { MAX_PERIOD } from './gdut.js';
+import { MAX_PERIOD, periodsFor } from './gdut.js';
+import { daysBetween, formatDate, parseDate } from './time.js';
 
 const MAX_WEEK = 30;
 
@@ -143,14 +144,182 @@ function collectRecords(node: unknown, out: RawRecord[], depth = 0) {
   for (const value of Object.values(rec)) collectRecords(value, out, depth + 1);
 }
 
-/** 解析粘贴进来的课表数据。不是 JSON 或找不到上课记录时，courses 为空并给出原因 */
-export function parseTimetableImport(text: string): ImportParseResult {
+export interface TimetableImportParseOptions {
+  /** 解析 .ics 日历文件时用于推算周次的开学第 1 周周一（YYYY-MM-DD） */
+  semesterStartDate?: string;
+  totalWeeks?: number;
+  campusId?: string | null;
+}
+
+function parseIcsDate(raw: string): Date | null {
+  const value = raw.trim();
+  // 支持 YYYYMMDDTHHMMSSZ 或 YYYYMMDDTHHMMSS（按北京时间）
+  const m = /^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})(Z?)$/.exec(value);
+  if (!m) return null;
+  const [, y, mo, d, h, mi, s, z] = m;
+  if (z === 'Z') {
+    return new Date(Date.UTC(Number(y), Number(mo) - 1, Number(d), Number(h), Number(mi), Number(s)));
+  }
+  return new Date(Date.UTC(Number(y), Number(mo) - 1, Number(d), Number(h), Number(mi), Number(s)) - 8 * 3600_000);
+}
+
+function unescapeIcs(s: string): string {
+  return s.replace(/\\n/gi, ' ').replace(/\\,/g, ',').replace(/\\;/g, ';').replace(/\\\\/g, '\\').trim();
+}
+
+function nearestPeriodRange(startMin: number, endMin: number, campusId?: string | null): [number, number] {
+  const periods = periodsFor(campusId).map((p) => {
+    const [sh, sm] = p.start.split(':').map(Number) as [number, number];
+    const [eh, em] = p.end.split(':').map(Number) as [number, number];
+    return { no: p.no, start: sh * 60 + sm, end: eh * 60 + em };
+  });
+  let pStart = periods[0]!.no;
+  let bestStartDiff = Infinity;
+  let pEnd = periods[0]!.no;
+  let bestEndDiff = Infinity;
+  for (const p of periods) {
+    const sd = Math.abs(p.start - startMin);
+    if (sd < bestStartDiff) {
+      bestStartDiff = sd;
+      pStart = p.no;
+    }
+    const ed = Math.abs(p.end - endMin);
+    if (ed < bestEndDiff) {
+      bestEndDiff = ed;
+      pEnd = p.no;
+    }
+  }
+  return [pStart, Math.max(pStart, pEnd)];
+}
+
+/** 解析标准 .ics（iCalendar）课表文件 */
+function parseIcsTimetable(text: string, opts?: TimetableImportParseOptions): ImportParseResult {
+  const warnings: string[] = [];
+  if (!opts?.semesterStartDate) {
+    return { courses: [], warnings: ['解析 .ics 课表前需要先设置本学期开学日期'], records: 0 };
+  }
+  // RFC 5545 折行还原
+  const unfolded = text.replace(/\r\n/g, '\n').replace(/\n[ \t]/g, '');
+  const blocks = unfolded.split('BEGIN:VEVENT').slice(1);
+  if (!blocks.length) {
+    return { courses: [], warnings: ['ICS 文件中没有找到任何课程日程（VEVENT）'], records: 0 };
+  }
+
+  const maxWeek = Math.min(MAX_WEEK, opts.totalWeeks ?? 25);
+  const courses = new Map<string, ImportedCourse>();
+  let recordCount = 0;
+
+  for (const block of blocks) {
+    const endIdx = block.indexOf('END:VEVENT');
+    const body = endIdx >= 0 ? block.slice(0, endIdx) : block;
+    const fields = new Map<string, string>();
+    for (const line of body.split('\n')) {
+      const colon = line.indexOf(':');
+      if (colon <= 0) continue;
+      const key = line.slice(0, colon).split(';')[0]!.trim().toUpperCase();
+      const val = line.slice(colon + 1).trim();
+      if (!fields.has(key)) fields.set(key, val);
+    }
+
+    const summary = fields.get('SUMMARY') ? unescapeIcs(fields.get('SUMMARY')!) : null;
+    const dtStart = fields.get('DTSTART') ? parseIcsDate(fields.get('DTSTART')!) : null;
+    const dtEnd = fields.get('DTEND') ? parseIcsDate(fields.get('DTEND')!) : null;
+    if (!summary || !dtStart) continue;
+    recordCount++;
+
+    const bjStart = new Date(dtStart.getTime() + 8 * 3600_000);
+    const bjEnd = dtEnd ? new Date(dtEnd.getTime() + 8 * 3600_000) : new Date(bjStart.getTime() + 90 * 60_000);
+    const startDateStr = formatDate({
+      year: bjStart.getUTCFullYear(),
+      month: bjStart.getUTCMonth() + 1,
+      day: bjStart.getUTCDate(),
+    });
+    const diff = daysBetween(opts.semesterStartDate, startDateStr);
+    const baseWeek = Math.floor(diff / 7) + 1;
+    if (baseWeek < 1 || baseWeek > maxWeek) {
+      warnings.push(`${summary}（${startDateStr}）：不在本学期周次范围内，已跳过`);
+      continue;
+    }
+
+    // 解析可选 RRULE（如 FREQ=WEEKLY;INTERVAL=1;COUNT=16 或 UNTIL=...）
+    const rrule = fields.get('RRULE') ?? '';
+    const weeks = new Set<number>([baseWeek]);
+    if (/FREQ=WEEKLY/i.test(rrule)) {
+      const interval = Number(/INTERVAL=(\d+)/i.exec(rrule)?.[1] ?? 1) || 1;
+      const countMatch = /COUNT=(\d+)/i.exec(rrule);
+      const untilMatch = /UNTIL=([0-9TZ]+)/i.exec(rrule);
+      if (countMatch) {
+        const count = Number(countMatch[1]);
+        for (let k = 1; k < count; k++) {
+          const w = baseWeek + k * interval;
+          if (w <= maxWeek) weeks.add(w);
+        }
+      } else if (untilMatch) {
+        const untilDate = parseIcsDate(untilMatch[1]!);
+        if (untilDate) {
+          const bjUntil = new Date(untilDate.getTime() + 8 * 3600_000);
+          const untilStr = formatDate({
+            year: bjUntil.getUTCFullYear(),
+            month: bjUntil.getUTCMonth() + 1,
+            day: bjUntil.getUTCDate(),
+          });
+          const endWeek = Math.min(maxWeek, Math.floor(daysBetween(opts.semesterStartDate, untilStr) / 7) + 1);
+          for (let w = baseWeek + interval; w <= endWeek; w += interval) weeks.add(w);
+        }
+      }
+    }
+
+    const weekday = parseDate(startDateStr).weekday;
+    const startMin = bjStart.getUTCHours() * 60 + bjStart.getUTCMinutes();
+    const endMin = bjEnd.getUTCHours() * 60 + bjEnd.getUTCMinutes();
+    const [periodStart, periodEnd] = nearestPeriodRange(startMin, endMin, opts.campusId);
+
+    const location = fields.get('LOCATION') ? unescapeIcs(fields.get('LOCATION')!).slice(0, 30) : null;
+    const desc = fields.get('DESCRIPTION') ? unescapeIcs(fields.get('DESCRIPTION')!) : '';
+    const teacherMatch = /(?:教师|老师)[:：\s]*([^\s,，;；]+)/.exec(desc);
+    const teacher = teacherMatch?.[1]?.slice(0, 20) ?? null;
+
+    const name = summary.slice(0, 30);
+    const key = importKeyOf(name, teacher);
+    const course = courses.get(key) ?? { importKey: key, name, teacher, location: null, slots: [] };
+    courses.set(key, course);
+
+    const weekArr = [...weeks].sort((a, b) => a - b);
+    const slot = course.slots.find(
+      (s) => s.weekday === weekday && s.periodStart === periodStart && s.periodEnd === periodEnd && s.location === location,
+    );
+    if (slot) slot.weeks = [...new Set([...slot.weeks, ...weekArr])].sort((a, b) => a - b);
+    else course.slots.push({ weekday, periodStart, periodEnd, weeks: weekArr, location });
+  }
+
+  for (const c of courses.values()) {
+    c.slots.sort((a, b) => a.weekday - b.weekday || a.periodStart - b.periodStart);
+    const rooms = new Set(c.slots.map((s) => s.location));
+    if (rooms.size === 1) {
+      c.location = c.slots[0]!.location ?? null;
+      for (const s of c.slots) s.location = null;
+    }
+    if (c.slots.length > 10) {
+      warnings.push(`${c.name}：上课时间段超过 10 个，只保留前 10 个`);
+      c.slots = c.slots.slice(0, 10);
+    }
+  }
+
+  return { courses: [...courses.values()], warnings, records: recordCount };
+}
+
+/** 解析粘贴或上传的课表数据：支持教务系统 JSON 与标准 .ics 日历文件 */
+export function parseTimetableImport(text: string, opts?: TimetableImportParseOptions): ImportParseResult {
+  const trimmed = text.trim();
+  if (trimmed.includes('BEGIN:VCALENDAR') || trimmed.includes('BEGIN:VEVENT')) {
+    return parseIcsTimetable(trimmed, opts);
+  }
   const warnings: string[] = [];
   let json: unknown;
   try {
-    json = JSON.parse(text.trim());
+    json = JSON.parse(trimmed);
   } catch {
-    return { courses: [], warnings: ['不是有效的 JSON。请复制开发者工具里请求的「响应」内容，不要复制网页上的文字'], records: 0 };
+    return { courses: [], warnings: ['不是有效的 JSON 或 ICS 日历文件。请粘贴教务系统响应 JSON，或选择 .json / .ics 文件'], records: 0 };
   }
   const records: RawRecord[] = [];
   collectRecords(json, records);

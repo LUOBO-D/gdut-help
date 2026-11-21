@@ -53,6 +53,12 @@ const envSchema = z
       ),
     /** 提醒扫描间隔（秒） */
     REMINDER_POLL_SECONDS: z.coerce.number().int().min(5).max(120).default(15),
+    /** 自用阶段提交商家直接上架；公开发布时设为 false，进入待审核/待确认队列 */
+    MERCHANT_AUTO_APPROVE: bool,
+    /** 可选大模型（DeepSeek 等 OpenAI 兼容接口）用于润色餐食推荐理由，留空时纯规则生成 */
+    LLM_API_BASE: z.string().default('https://api.deepseek.com/v1'),
+    LLM_API_KEY: z.string().default(''),
+    LLM_MODEL: z.string().default('deepseek-chat'),
   })
   .superRefine((env, ctx) => {
     if (env.NODE_ENV === 'production' && env.MAIL_DRIVER === 'console') {
@@ -68,6 +74,7 @@ const envSchema = z
     ...env,
     SMTP_SECURE: env.SMTP_SECURE ?? env.SMTP_PORT === 465,
     COOKIE_SECURE: env.COOKIE_SECURE ?? env.NODE_ENV === 'production',
+    MERCHANT_AUTO_APPROVE: env.MERCHANT_AUTO_APPROVE ?? true,
   }));
 
 export type Env = z.infer<typeof envSchema>;

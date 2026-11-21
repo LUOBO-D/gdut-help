@@ -10,7 +10,11 @@ import { AuthService } from './auth.service.js';
   imports: [
     JwtModule.registerAsync({
       inject: [ENV],
-      useFactory: (env: Env) => ({ secret: env.JWT_SECRET, signOptions: { algorithm: 'HS256' } }),
+      useFactory: (env: Env) => ({
+        secret: env.JWT_SECRET,
+        signOptions: { algorithm: 'HS256', issuer: 'gduthelp' },
+        verifyOptions: { algorithms: ['HS256'], issuer: 'gduthelp' },
+      }),
     }),
   ],
   controllers: [AuthController],

@@ -6,6 +6,7 @@ import { Button } from '../../components/Button';
 import { GlassCard } from '../../components/GlassCard';
 import { ChevronLeftIcon, ChevronRightIcon, PinIcon, PlusIcon } from '../../components/icons';
 import { PageHeader } from '../../components/PageHeader';
+import { CardSkeleton } from '../../components/Skeleton';
 import { useAuth } from '../../lib/auth-store';
 import { useTimetable } from '../../lib/queries';
 import { useNow } from '../../lib/use-now';
@@ -36,7 +37,14 @@ export function TimetablePage() {
   /** 打开过一次后保持挂载，关闭时才有收起动画 */
   const [importLoaded, setImportLoaded] = useState(false);
 
-  if (isPending && !data) return <PageHeader title="课表" subtitle="加载中…" />;
+  if (isPending && !data) {
+    return (
+      <>
+        <PageHeader title="课表" subtitle="正在同步课表…" />
+        <CardSkeleton rows={4} />
+      </>
+    );
+  }
 
   if (!semester) {
     return (

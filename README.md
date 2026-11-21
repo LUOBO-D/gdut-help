@@ -24,7 +24,7 @@ pnpm dev            # http://localhost:5173
 
 完整步骤（不装 Docker 的方案、验证码在哪看、手机通过 Tailscale 访问）见 [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)。
 
-当前进度：S0–S2 已完成（基础搭建、3D 天空、天气 / 课表 / 待办提醒），见 [开发路线](docs/05-roadmap.md)。
+当前进度：自用版 S0–S4 已全部完成（基础搭建、3D 天空、天气 / 课表 / 待办与智能提醒、吃什么与 DeepSeek 润色、评分与贝叶斯榜单），见 [开发路线](docs/05-roadmap.md)。
 
 ## 文档目录
 

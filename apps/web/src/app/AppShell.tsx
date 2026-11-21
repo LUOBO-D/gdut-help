@@ -1,13 +1,16 @@
 import { AnimatePresence, motion } from 'motion/react';
 import { useState } from 'react';
 import { useLocation, useOutlet } from 'react-router';
+import { ErrorBoundary, PageErrorFallback } from '../components/ErrorBoundary';
 import { SideNav } from '../components/SideNav';
 import { TabBar } from '../components/TabBar';
+import { useAppShortcuts } from '../lib/use-shortcuts';
 import { pageVariants, spring } from '../motion/presets';
 import { navIndex } from './nav';
 
 /** 登录后的主框架：手机底部标签栏 / 电脑侧边栏，页面按标签顺序左右滑动切换。 */
 export function AppShell() {
+  useAppShortcuts();
   const { pathname } = useLocation();
   const index = navIndex(pathname);
   // 记住上一个标签的序号以决定滑动方向（渲染期间调整 state 是 React 推荐的派生写法）
@@ -29,7 +32,9 @@ export function AppShell() {
             exit="exit"
             transition={spring.page}
           >
-            <FrozenOutlet />
+            <ErrorBoundary key={pathname} fallback={<PageErrorFallback />}>
+              <FrozenOutlet />
+            </ErrorBoundary>
           </motion.main>
         </AnimatePresence>
       </div>

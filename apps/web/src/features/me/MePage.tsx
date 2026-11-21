@@ -1,15 +1,18 @@
 import { updateProfileSchema, type UserProfile } from '@gduthelp/shared';
 import { motion } from 'motion/react';
 import { useState, type FormEvent } from 'react';
-import { useNavigate } from 'react-router';
+import { Link, useNavigate } from 'react-router';
 import { Button } from '../../components/Button';
 import { GlassCard } from '../../components/GlassCard';
 import { PageHeader } from '../../components/PageHeader';
+import { ChevronRightIcon } from '../../components/icons';
 import { ApiError, logout } from '../../lib/api';
 import { useAuth } from '../../lib/auth-store';
+import { usePreferences } from '../../lib/queries';
 import { SCENE_STYLES, SCENES, type Scene } from '../../lib/scene';
 import { useUi } from '../../lib/ui-store';
 import { pressable, spring } from '../../motion/presets';
+import { PreferencesSheet } from '../food/PreferencesSheet';
 import { CampusPicker } from './CampusPicker';
 import { DisplaySettings } from './DisplaySettings';
 import { ReminderSettings } from './ReminderSettings';
@@ -20,7 +23,23 @@ export function MePage() {
   const user = useAuth((s) => s.user);
   const navigate = useNavigate();
   const [loggingOut, setLoggingOut] = useState(false);
+  const [prefOpen, setPrefOpen] = useState(false);
+  const prefQuery = usePreferences();
   if (!user) return null;
+
+  const pref = prefQuery.data;
+  const prefSummary =
+    pref && (pref.tastes.length || pref.dislikes.length || pref.budgetMin != null || pref.budgetMax != null)
+      ? [
+          pref.tastes.length ? `偏好：${pref.tastes.slice(0, 3).join('·')}` : null,
+          pref.dislikes.length ? `忌口：${pref.dislikes.slice(0, 3).join('·')}` : null,
+          pref.budgetMin != null || pref.budgetMax != null
+            ? `预算：¥${pref.budgetMin ?? '不限'}–${pref.budgetMax ?? '不限'}`
+            : null,
+        ]
+          .filter(Boolean)
+          .join(' ｜ ')
+      : '未设置口味、忌口与预算';
 
   return (
     <>
@@ -28,8 +47,30 @@ export function MePage() {
       <div className="space-y-4">
         <ProfileCard user={user} />
         <CampusPicker />
+        <GlassCard className="p-5">
+          <button type="button" className="flex w-full items-center justify-between gap-3 text-left" onClick={() => setPrefOpen(true)}>
+            <div className="min-w-0">
+              <h2 className="text-[15px] font-semibold">饮食偏好</h2>
+              <p className="mt-1 truncate text-sm text-fg-muted">{prefSummary}</p>
+            </div>
+            <ChevronRightIcon size={18} className="shrink-0 text-fg-muted" />
+          </button>
+        </GlassCard>
         <ReminderSettings />
-        {user.role === 'admin' && <SemesterSettings />}
+        {user.role === 'admin' && (
+          <>
+            <GlassCard className="p-5">
+              <Link to="/admin" className="flex items-center justify-between gap-3">
+                <div>
+                  <h2 className="text-[15px] font-semibold">商家管理 · 管理员</h2>
+                  <p className="mt-1 text-sm text-fg-muted">审核待上架商家、编辑信息或标记已关店</p>
+                </div>
+                <ChevronRightIcon size={18} className="shrink-0 text-fg-muted" />
+              </Link>
+            </GlassCard>
+            <SemesterSettings />
+          </>
+        )}
         <ScenePicker />
         <DisplaySettings />
         <Button
@@ -45,6 +86,7 @@ export function MePage() {
           退出登录
         </Button>
       </div>
+      <PreferencesSheet open={prefOpen} onClose={() => setPrefOpen(false)} initial={pref} />
     </>
   );
 }

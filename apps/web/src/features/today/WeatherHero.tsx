@@ -21,33 +21,40 @@ export function WeatherHero() {
 
   if (!w) {
     return (
-      <section className="py-10 text-center" aria-label="天气">
+      <section className="py-7 text-center sm:py-9" aria-label="天气">
         <p className="flex items-start justify-center font-num font-extralight leading-none tabular-nums">
-          <span className="text-[96px] tracking-tight">--</span>
-          <span className="mt-3 text-4xl text-fg-muted">°</span>
+          <span className="text-[84px] tracking-tight sm:text-[96px]">--</span>
+          <span className="mt-2.5 text-3xl text-fg-muted sm:mt-3 sm:text-4xl">°</span>
         </p>
-        <p className="mt-3 text-fg-muted">{isPending ? '正在获取天气…' : isError ? '天气暂时获取不到' : ''}</p>
+        <p className="mt-3 text-sm text-fg-muted">{isPending ? '正在获取实时天气…' : isError ? '天气暂时获取不到' : ''}</p>
       </section>
     );
   }
 
-  const tip = w.today.pop !== null && w.today.pop >= 50 ? ' · 记得带伞' : '';
+  const needUmbrella = w.today.pop !== null && w.today.pop >= 50;
   return (
-    <section className="py-8 text-center" aria-label="天气">
+    <section className="py-6 text-center sm:py-8" aria-label="天气">
       <p className="text-sm text-fg-muted">
         {w.location}
         {campus && ` · ${campus.name}`}
       </p>
-      <p className="mt-1 flex items-start justify-center font-num font-extralight leading-none tabular-nums" aria-label={`${w.now.temp} 度`}>
-        <span className="text-[96px] tracking-tight">
+      <p
+        className="mt-1 flex items-start justify-center font-num font-extralight leading-none tabular-nums"
+        aria-label={`${w.now.temp} 度`}
+      >
+        <span className="text-[84px] tracking-tight sm:text-[96px]">
           <RollingNumber value={w.now.temp} />
         </span>
-        <span className="mt-3 text-4xl text-fg-muted">°</span>
+        <span className="mt-2.5 text-3xl text-fg-muted sm:mt-3 sm:text-4xl">°</span>
       </p>
-      <p className="mt-2 text-lg">{w.now.text}</p>
-      <p className="mt-1 text-sm text-fg-muted">
+      <div className="mt-2 flex items-center justify-center gap-2">
+        <span className="text-lg font-medium">{w.now.text}</span>
+        {needUmbrella && (
+          <span className="glass-thin rounded-full! px-2.5 py-0.5 text-xs font-medium text-accent">记得带伞</span>
+        )}
+      </div>
+      <p className="mt-1 font-num text-sm text-fg-muted tabular-nums">
         {w.today.min}° / {w.today.max}° · 体感 {w.now.feelsLike}°{w.today.pop !== null && ` · 降水 ${w.today.pop}%`}
-        {tip}
       </p>
       {w.stale && <p className="mt-1 text-xs text-fg-muted">天气服务暂时不可用，显示的是较早的数据</p>}
     </section>

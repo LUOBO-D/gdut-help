@@ -10,3 +10,6 @@ export * from './timetable-import.js';
 export * from './todo.js';
 export * from './weather.js';
 export * from './format.js';
+export * from './food.js';
+export * from './review.js';
+export * from './smart-reminder.js';

@@ -24,6 +24,7 @@ export const router = createBrowserRouter([
               { path: 'todo', lazy: () => import('../features/todo/TodoPage').then((m) => ({ Component: m.TodoPage })) },
               { path: 'ranking', lazy: () => import('../features/ranking/RankingPage').then((m) => ({ Component: m.RankingPage })) },
               { path: 'me', lazy: () => import('../features/me/MePage').then((m) => ({ Component: m.MePage })) },
+              { path: 'admin', lazy: () => import('../features/admin/AdminPage').then((m) => ({ Component: m.AdminPage })) },
             ],
           },
         ],

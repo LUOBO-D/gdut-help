@@ -5,8 +5,11 @@ import { AuthModule } from './auth/auth.module.js';
 import { AppConfigModule } from './config/config.module.js';
 import { HealthController } from './health/health.controller.js';
 import { MailModule } from './mail/mail.module.js';
+import { MerchantModule } from './merchant/merchant.module.js';
 import { PrismaModule } from './prisma/prisma.module.js';
 import { NotifyModule } from './notify/notify.module.js';
+import { RecommendModule } from './recommend/recommend.module.js';
+import { ReviewModule } from './review/review.module.js';
 import { TimetableModule } from './timetable/timetable.module.js';
 import { TodoModule } from './todo/todo.module.js';
 import { UsersModule } from './users/users.module.js';
@@ -25,6 +28,9 @@ import { WeatherModule } from './weather/weather.module.js';
     TimetableModule,
     NotifyModule,
     TodoModule,
+    MerchantModule,
+    RecommendModule,
+    ReviewModule,
   ],
   controllers: [HealthController],
   // 限流守卫先于登录守卫执行，未登录的暴力请求也会被拦住

@@ -276,6 +276,15 @@ flowchart TD
 | 某天的课由后端计算 | 后端只返回学期和课程，前端用共享的 `sessionsOn()` 计算 | 离线时也能算出今天和下周的课 |
 | 智能提醒、重复待办、课前提醒 | 未做，放到 S4 | S2 先保证手动提醒稳定 |
 
+## 5.1 S3 实现说明（与上文设计的差异）
+
+| 设计 | 实际实现 | 原因 |
+| --- | --- | --- |
+| 商家查重依赖 PostgreSQL `pg_trgm` + 经纬度 200 米 | 在 `packages/shared/src/food.ts` 用双字 Dice 相似度 + 包含关系 + 同位置加权实现同校区实时查重，同时保留 `lat/lng` 字段 | 不依赖 `pg_trgm` 扩展，兼容本地 `prisma dev`（PGlite）与生产 PostgreSQL，且前后端与单测共用 |
+| 商家位置用高德地图选点与 `price_level` 档位 | 先用 `location_text` + 可选 `walk_minutes`（步行分钟）+ 精确 `price_avg`（人均元），保留 `lat/lng` 供后续接入地图 | 自用阶段无需申请高德 Key，且人均金额与步行分钟直接参与预算过滤与课间距离打分，更精准 |
+| 商家审核 / 多人确认 / 纠错 | `merchant_confirmations`、`merchant_edits` 表在 S3 一次建好；自用阶段由 `MERCHANT_AUTO_APPROVE=true` 控制提交即上架，管理员可在 `/admin` 审核、编辑或标记关店 | 按路线图「表先建好、多人确认逻辑在 P2 公开版启用」 |
+| 大模型生成推荐理由 | S3 先用规则模板结合天气、课表空档、心情、偏好与招牌菜生成自然理由；大模型润色按路线图放到 S4 | 先把规则打分、品类打散和反馈闭环做稳 |
+
 ## 6. 安全
 
 - 所有接口 HTTPS；JWT 放 `Authorization` 头，Refresh Token 在 App 中存 Secure Storage，Web 中存 HttpOnly Cookie。

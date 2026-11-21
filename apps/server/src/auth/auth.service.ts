@@ -1,4 +1,4 @@
-import { HttpStatus, Inject, Injectable, Logger } from '@nestjs/common';
+import { HttpStatus, Inject, Injectable, Logger, OnApplicationBootstrap, OnModuleDestroy } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { ErrorCode, type AuthSession, type UserProfile, type UserRole } from '@gduthelp/shared';
 import { AppException } from '../common/app.exception.js';
@@ -14,6 +14,8 @@ import {
   hashRefreshToken,
   safeEqualHex,
 } from './token.util.js';
+
+export const JWT_ISSUER = 'gduthelp';
 
 export const AUTH_LIMITS = {
   codeTtlMinutes: 10,
@@ -50,9 +52,13 @@ export class RefreshRaceException extends AppException {
 }
 const banned = () => new AppException(ErrorCode.FORBIDDEN, '账号已被封禁', HttpStatus.FORBIDDEN);
 
+const CLEANUP_INTERVAL_MS = 6 * 60 * 60 * 1000;
+
 @Injectable()
-export class AuthService {
+export class AuthService implements OnApplicationBootstrap, OnModuleDestroy {
   private readonly logger = new Logger(AuthService.name);
+  private cleanupTimer: NodeJS.Timeout | null = null;
+  private initialCleanupTimer: NodeJS.Timeout | null = null;
 
   constructor(
     private readonly prisma: PrismaService,
@@ -61,7 +67,41 @@ export class AuthService {
     @Inject(ENV) private readonly env: Env,
   ) {}
 
-  async sendEmailCode(email: string, ip: string): Promise<{ cooldownSeconds: number }> {
+  onApplicationBootstrap() {
+    if (this.env.NODE_ENV === 'test') return;
+    this.cleanupTimer = setInterval(() => void this.cleanupExpiredRecords(), CLEANUP_INTERVAL_MS);
+    this.cleanupTimer.unref();
+    // 启动后延后 15 秒再执行首次清理，避免与提醒扫描并发抢占开发库连接
+    this.initialCleanupTimer = setTimeout(() => void this.cleanupExpiredRecords(), 15_000);
+    this.initialCleanupTimer.unref();
+  }
+
+  onModuleDestroy() {
+    if (this.cleanupTimer) clearInterval(this.cleanupTimer);
+    if (this.initialCleanupTimer) clearTimeout(this.initialCleanupTimer);
+  }
+
+  /** 定期清理已过期验证码与失效刷新令牌，防止认证表无限增长 */
+  async cleanupExpiredRecords(now = Date.now()): Promise<void> {
+    try {
+      const codeCutoff = new Date(now - DAY_MS);
+      const tokenCutoff = new Date(now - 7 * DAY_MS);
+      const [codes, tokens] = await Promise.all([
+        this.prisma.emailCode.deleteMany({ where: { createdAt: { lt: codeCutoff } } }),
+        this.prisma.refreshToken.deleteMany({
+          where: { OR: [{ expiresAt: { lt: new Date(now) } }, { revokedAt: { lt: tokenCutoff } }] },
+        }),
+      ]);
+      if (codes.count || tokens.count) {
+        this.logger.log(`已清理历史认证记录：验证码 ${codes.count} 条，令牌 ${tokens.count} 条`);
+      }
+    } catch (err) {
+      this.logger.warn(`清理历史认证记录失败：${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
+  async sendEmailCode(rawEmail: string, ip: string): Promise<{ cooldownSeconds: number }> {
+    const email = rawEmail.trim().toLowerCase();
     const now = Date.now();
     const dayAgo = new Date(now - DAY_MS);
 
@@ -107,7 +147,8 @@ export class AuthService {
     return { cooldownSeconds: AUTH_LIMITS.resendCooldownSeconds };
   }
 
-  async loginWithEmailCode(email: string, code: string, userAgent?: string): Promise<IssuedSession> {
+  async loginWithEmailCode(rawEmail: string, code: string, userAgent?: string): Promise<IssuedSession> {
+    const email = rawEmail.trim().toLowerCase();
     const record = await this.prisma.emailCode.findFirst({
       where: { email, consumedAt: null, expiresAt: { gt: new Date() } },
       orderBy: { createdAt: 'desc' },
@@ -180,9 +221,18 @@ export class AuthService {
     const shouldBeAdmin = this.env.ADMIN_EMAILS.includes(email);
     const existing = await this.prisma.user.findUnique({ where: { email } });
     if (!existing) {
-      return this.prisma.user.create({
-        data: { email, nickname: email.split('@')[0]!.slice(0, 20), role: shouldBeAdmin ? 'admin' : 'user' },
-      });
+      try {
+        return await this.prisma.user.create({
+          data: { email, nickname: email.split('@')[0]!.slice(0, 20), role: shouldBeAdmin ? 'admin' : 'user' },
+        });
+      } catch (err) {
+        // 并发首次登录命中唯一约束时回查已创建的账号
+        if (err && typeof err === 'object' && (err as { code?: string }).code === 'P2002') {
+          const raced = await this.prisma.user.findUnique({ where: { email } });
+          if (raced) return raced;
+        }
+        throw err;
+      }
     }
     // 只做提升，不自动降级：从 ADMIN_EMAILS 移除某人后需在后台手动调整
     if (shouldBeAdmin && existing.role !== 'admin') {
@@ -193,7 +243,10 @@ export class AuthService {
 
   private async issueSession(user: User, userAgent?: string): Promise<IssuedSession> {
     const payload: AccessTokenPayload = { sub: user.id, role: user.role };
-    const accessToken = await this.jwt.signAsync(payload, { expiresIn: AUTH_LIMITS.accessTokenSeconds });
+    const accessToken = await this.jwt.signAsync(payload, {
+      expiresIn: AUTH_LIMITS.accessTokenSeconds,
+      issuer: JWT_ISSUER,
+    });
     const refreshToken = generateRefreshToken();
     const refreshExpiresAt = new Date(Date.now() + AUTH_LIMITS.refreshTokenDays * DAY_MS);
 

@@ -1,10 +1,17 @@
+import { dayOffset } from '@gduthelp/shared';
 import { motion } from 'motion/react';
 import { NavLink } from 'react-router';
 import { TABS } from '../app/nav';
+import { useTodos } from '../lib/queries';
+import { useNow } from '../lib/use-now';
 import { spring } from '../motion/presets';
 
-/** 手机端底部标签栏：厚玻璃 + 跟随选中项滑动的液态指示块。 */
+/** 手机端底部标签栏：厚玻璃 + 跟随选中项滑动的液态指示块 + 轻提示圆点。 */
 export function TabBar() {
+  const { data: todos = [] } = useTodos();
+  const now = useNow(60_000);
+  const hasUrgentTodo = todos.some((t) => !t.completedAt && t.dueAt && dayOffset(new Date(t.dueAt), now) <= 0);
+
   return (
     <nav
       aria-label="主导航"
@@ -29,6 +36,12 @@ export function TabBar() {
                     transition={spring.bouncy}
                   >
                     <Icon size={22} />
+                    {to === '/todo' && hasUrgentTodo && (
+                      <span
+                        className="absolute -right-1 -top-0.5 size-2 rounded-full bg-accent ring-2 ring-white/40"
+                        aria-label="有今日截止或逾期待办"
+                      />
+                    )}
                   </motion.span>
                   <span className={`relative text-[11px] ${isActive ? 'font-semibold text-fg' : 'text-fg-muted'}`}>
                     {label}

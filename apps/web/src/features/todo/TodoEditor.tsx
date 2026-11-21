@@ -1,10 +1,23 @@
-import { formatWhen, MAX_REMINDERS, PRIORITY_LABEL, reminderFireAt, todoInputSchema, type ReminderInput, type Todo, type TodoInput } from '@gduthelp/shared';
+import {
+  computeSmartReminders,
+  formatWhen,
+  MAX_REMINDERS,
+  PRIORITY_LABEL,
+  reminderFireAt,
+  todoInputSchema,
+  type ReminderInput,
+  type Todo,
+  type TodoInput,
+} from '@gduthelp/shared';
 import { useState } from 'react';
 import { Button } from '../../components/Button';
 import { Chip, Field } from '../../components/Field';
 import { XIcon } from '../../components/icons';
 import { Sheet } from '../../components/Sheet';
 import { ApiError } from '../../lib/api';
+import { useAuth } from '../../lib/auth-store';
+import { useTimetable } from '../../lib/queries';
+import { toast } from '../../lib/toast-store';
 import { useNow } from '../../lib/use-now';
 import { at, fromLocalInput, toLocalInput } from './datetime';
 import { useDeleteTodo, useSaveTodo } from './mutations';
@@ -33,6 +46,8 @@ export function TodoEditor({ todo, open, onClose }: { todo: Todo | null; open: b
 function TodoForm({ todo, onDone }: { todo: Todo | null; onDone: () => void }) {
   const save = useSaveTodo();
   const remove = useDeleteTodo();
+  const timetable = useTimetable().data;
+  const campusId = useAuth((s) => s.user?.campusId);
   const [title, setTitle] = useState(todo?.title ?? '');
   const [note, setNote] = useState(todo?.note ?? '');
   const [due, setDue] = useState(toLocalInput(todo?.dueAt));
@@ -43,11 +58,26 @@ function TodoForm({ todo, onDone }: { todo: Todo | null; onDone: () => void }) {
   );
   const [customs, setCustoms] = useState<string[]>(pending.filter((r) => r.offsetMinutes === null).map((r) => toLocalInput(r.fireAt)));
   const [customDraft, setCustomDraft] = useState('');
+  const [smartHint, setSmartHint] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
 
   const dueIso = fromLocalInput(due);
   const now = useNow(30_000);
+
+  const applySmartReminders = () => {
+    if (!dueIso) return;
+    const plan = computeSmartReminders({ dueAt: dueIso, priority, timetable, campusId, now });
+    if (!plan.reminders.length) {
+      toast.info('截止时间已过，无法生成智能提醒');
+      return;
+    }
+    setOffsets([]);
+    setCustoms(plan.reminders.map((r) => toLocalInput(r.at)));
+    const summary = plan.reminders.map((r) => r.reason).join('；');
+    setSmartHint(plan.freeSlotHint ? `${summary} · ${plan.freeSlotHint}` : summary);
+    toast.success(`已生成 ${plan.reminders.length} 条智能提醒`);
+  };
   const reminders: ReminderInput[] = [
     ...(dueIso ? offsets.map((m) => ({ offsetMinutes: m })) : []),
     ...customs.map((c) => fromLocalInput(c)).filter((x): x is string => !!x).map((iso) => ({ at: iso })),
@@ -102,23 +132,35 @@ function TodoForm({ todo, onDone }: { todo: Todo | null; onDone: () => void }) {
           {!dueIso && ' · 设置截止时间后可选「提前提醒」'}
         </p>
         {dueIso && (
-          <div className="mb-2 flex flex-wrap gap-1.5">
-            {OFFSETS.map((o) => {
-              const active = offsets.includes(o.minutes);
-              const fire = reminderFireAt({ offsetMinutes: o.minutes }, dueIso)!;
-              const past = fire < now && !sentTimes.has(fire.toISOString());
-              return (
-                <Chip
-                  key={o.minutes}
-                  active={active}
-                  onClick={() => setOffsets(active ? offsets.filter((m) => m !== o.minutes) : count < MAX_REMINDERS ? [...offsets, o.minutes] : offsets)}
-                  className={past ? 'opacity-50' : ''}
-                >
-                  {o.label}
-                  {past && active ? '（已过）' : ''}
-                </Chip>
-              );
-            })}
+          <div className="mb-2.5 space-y-2">
+            <div className="flex items-center justify-between gap-2">
+              <button
+                type="button"
+                onClick={applySmartReminders}
+                className="surface-subtle surface-subtle-hover rounded-full px-3 py-1 text-xs font-medium text-accent"
+              >
+                ✦ 智能计算提醒（避开上课和深夜）
+              </button>
+            </div>
+            {smartHint && <p className="text-xs text-fg-muted">{smartHint}</p>}
+            <div className="flex flex-wrap gap-1.5">
+              {OFFSETS.map((o) => {
+                const active = offsets.includes(o.minutes);
+                const fire = reminderFireAt({ offsetMinutes: o.minutes }, dueIso)!;
+                const past = fire < now && !sentTimes.has(fire.toISOString());
+                return (
+                  <Chip
+                    key={o.minutes}
+                    active={active}
+                    onClick={() => setOffsets(active ? offsets.filter((m) => m !== o.minutes) : count < MAX_REMINDERS ? [...offsets, o.minutes] : offsets)}
+                    className={past ? 'opacity-50' : ''}
+                  >
+                    {o.label}
+                    {past && active ? '（已过）' : ''}
+                  </Chip>
+                );
+              })}
+            </div>
           </div>
         )}
         {customs.map((c, i) => (
