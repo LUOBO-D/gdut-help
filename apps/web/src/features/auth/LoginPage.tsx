@@ -531,6 +531,7 @@ export function LoginPage() {
         <div className="mt-4">
           <Link
             to="/map"
+            state={{ fromLogin: true }}
             className="glass flex items-center justify-center gap-2 rounded-2xl px-4 py-3 text-sm font-medium text-fg transition-transform active:scale-[0.98]"
           >
             <MapIcon size={17} className="text-accent" />

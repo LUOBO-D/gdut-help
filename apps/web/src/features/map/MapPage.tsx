@@ -16,10 +16,11 @@ import {
   type RouteMode,
 } from '@gduthelp/shared';
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Link, useSearchParams } from 'react-router';
+import { useLocation, useNavigate, useSearchParams } from 'react-router';
 import { Button } from '../../components/Button';
 import { ErrorBoundary } from '../../components/ErrorBoundary';
 import {
+  ArrowLeftIcon,
   ChevronRightIcon,
   CompassIcon,
   LocateIcon,
@@ -34,6 +35,7 @@ import {
 import { useAuth } from '../../lib/auth-store';
 import { getCurrentLocation, LocationError, watchLocation, type GeoFix } from '../../lib/location';
 import { hapticLight } from '../../lib/native-ux';
+import { pushSheet } from '../../lib/sheet-stack';
 import { toast } from '../../lib/toast-store';
 import { useNow } from '../../lib/use-now';
 import {
@@ -123,15 +125,33 @@ function resolveInitialDeepLink(params: URLSearchParams): InitialDeepLink {
 
 export function MapPage() {
   const isAuthed = useAuth((s) => s.status === 'authenticated');
+  const location = useLocation();
+  const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const [initialLink] = useState(() => resolveInitialDeepLink(searchParams));
   const now = useNow(60_000);
+
+  const handleBackToLogin = useCallback(() => {
+    hapticLight();
+    const fromLogin = Boolean((location.state as { fromLogin?: boolean } | null)?.fromLogin);
+    const historyIdx = (window.history.state as { idx?: unknown } | null)?.idx;
+    if (fromLogin && typeof historyIdx === 'number' && historyIdx > 0) {
+      navigate(-1);
+    } else {
+      navigate('/login', { replace: true });
+    }
+  }, [location.state, navigate]);
 
   const [timeMode, setTimeMode] = useState<MapTimeMode>('auto');
   const [view3d, setView3d] = useState(true);
   const [category, setCategory] = useState<BuildingCategory>('all');
   const [query, setQuery] = useState(initialLink.query);
   const [searchOpen, setSearchOpen] = useState(initialLink.searchOpen);
+
+  useEffect(() => {
+    if (!searchOpen) return;
+    return pushSheet(() => setSearchOpen(false));
+  }, [searchOpen]);
 
   const [selectedId, setSelectedId] = useState<string | null>(initialLink.selectedId);
   const [classroomNote, setClassroomNote] = useState<string | null>(initialLink.classroomNote);
@@ -441,7 +461,18 @@ export function MapPage() {
       <div className="pointer-events-none absolute inset-x-0 top-0 z-20 px-3 pt-[max(env(safe-area-inset-top),12px)] xl:px-6 xl:pt-5">
         <div className="mx-auto max-w-xl space-y-2">
           <div className={`pointer-events-auto relative rounded-2xl ${panelSurface}`}>
-            <div className="flex items-center gap-2 px-3.5 py-2.5">
+            <div className="flex items-center gap-2 px-3 py-2.5">
+              {!isAuthed && (
+                <button
+                  type="button"
+                  onClick={handleBackToLogin}
+                  className={`grid size-8 shrink-0 place-items-center rounded-full transition-colors ${subtlePill}`}
+                  aria-label="返回登录"
+                  title="返回登录"
+                >
+                  <ArrowLeftIcon size={17} />
+                </button>
+              )}
               <SearchIcon size={18} className={`shrink-0 ${mutedText}`} />
               <input
                 type="text"
@@ -472,12 +503,13 @@ export function MapPage() {
                 </button>
               )}
               {!isAuthed ? (
-                <Link
-                  to="/login"
+                <button
+                  type="button"
+                  onClick={handleBackToLogin}
                   className="shrink-0 rounded-full bg-orange-500 px-2.5 py-1 text-[11px] font-semibold text-white shadow-sm hover:bg-orange-600"
                 >
                   登录
-                </Link>
+                </button>
               ) : (
                 <span
                   className={`hidden shrink-0 rounded-full px-2 py-0.5 text-[11px] font-medium sm:inline ${subtlePill}`}

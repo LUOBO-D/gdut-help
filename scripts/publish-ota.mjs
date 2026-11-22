@@ -28,7 +28,7 @@ function parseArgs(argv) {
   let notes = '';
   let notesFile = '';
   let apkUrl = '';
-  let minNativeVersion = 4;
+  let minNativeVersion = 5;
   let skipBuild = false;
 
   for (const arg of argv) {

@@ -521,7 +521,7 @@ function AppUpdateCard() {
               )}
             </div>
             <p className="mt-1 text-sm text-fg-muted">
-              当前版本 v{info?.bundleVersion ?? '…'}（外壳 v{info?.nativeVersion ?? 4}
+              当前版本 v{info?.bundleVersion ?? '…'}（外壳 v{info?.nativeVersion ?? 5}
               {info?.isOtaActive ? ' · 已热更新' : ''}）
             </p>
             {origin && <p className="mt-1 truncate text-xs text-fg-muted">后端：{origin}</p>}

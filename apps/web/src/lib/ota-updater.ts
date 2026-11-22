@@ -13,10 +13,10 @@ import { getApiOrigin, isNative } from './platform';
 import { toast } from './toast-store';
 
 /** 当前前端资源包版本（由构建时 VITE_APP_VERSION 注入） */
-export const APP_BUNDLE_VERSION = (import.meta.env.VITE_APP_VERSION || '0.3.3').trim();
+export const APP_BUNDLE_VERSION = (import.meta.env.VITE_APP_VERSION || '0.3.4').trim();
 
 /** 当前安卓原生外壳 versionCode（与 android/app/build.gradle 保持同步） */
-export const NATIVE_APP_VERSION = 4;
+export const NATIVE_APP_VERSION = 5;
 
 const CHECK_INTERVAL_MS = 30 * 60_000;
 let initialized = false;
