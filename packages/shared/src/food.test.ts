@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { addDays } from './time.js';
 import {
   analyzeMealWindow,
   defaultMealForHour,
@@ -223,5 +224,194 @@ describe('吃什么规则推荐打分', () => {
       context: { party: 'solo', pace: 'rush' },
     });
     expect(soloRushRes[0]!.merchant.id).toBe('canteen');
+  });
+
+  it('待办临近本餐截止或考前空档时，能识别紧迫性并优先近且快的店', () => {
+    const todoCtx = analyzeMealWindow([], 'lunch', {
+      date: '2026-11-22',
+      todos: [
+        { title: '提交物理实验报告', priority: 2, dueAt: '2026-11-22T05:00:00.000Z' }, // 北京 13:00
+      ],
+    });
+    expect(todoCtx.todoCount).toBe(1);
+    expect(todoCtx.tightByTodo).toBe(true);
+    expect(todoCtx.hasAnySchedule).toBe(true);
+    expect(todoCtx.hint).toContain('提交物理实验报告');
+
+    const nearFast = makeMerchant({
+      id: 'near-fast',
+      name: '一饭烧腊快餐',
+      category: 'canteen',
+      walkMinutes: 4,
+      tags: ['饭', '快手', '热食'],
+    });
+    const farHotpot = makeMerchant({
+      id: 'far-hotpot',
+      name: '远郊炭火火锅',
+      category: 'hotpot',
+      walkMinutes: 20,
+      tags: ['辣', '聚餐', '热食'],
+    });
+
+    // 即使开启 dailyRandom，待办紧迫时也应稳妥把近且快的店排在远处火锅前
+    const res = scoreAndRecommendMeals({
+      merchants: [farHotpot, nearFast],
+      meal: 'lunch',
+      weather: null,
+      schedule: todoCtx,
+      mood: null,
+      preference: null,
+      feedbacks: [],
+      dailyRandom: { seedKey: 'u1', date: '2026-11-22' },
+    });
+    expect(res[0]!.merchant.id).toBe('near-fast');
+    expect(res[0]!.reason).toContain('待办');
+
+    const examCtx = analyzeMealWindow([], 'lunch', {
+      date: '2026-11-22',
+      exams: [{ courseName: '数据结构', startTime: '14:00', endTime: '16:00', location: '教1-201' }],
+    });
+    expect(examCtx.examUpcoming).toBe(true);
+    expect(examCtx.hasAnySchedule).toBe(true);
+    expect(examCtx.hint).toContain('数据结构');
+  });
+
+  it('连续多天均无课无待办时，每天每日随机推荐不重样，且同一天同一餐稳定、同日午晚饭错开', () => {
+    const freeSchedule = analyzeMealWindow([], 'lunch', { date: '2026-11-01', todos: [] });
+    expect(freeSchedule.hasAnySchedule).toBe(false);
+    expect(freeSchedule.hint).toContain('随机');
+
+    const catalog: Merchant[] = [
+      makeMerchant({ id: 'm1', name: '一饭烧腊饭', category: 'canteen', walkMinutes: 4, tags: ['饭', '热食', '快手'] }),
+      makeMerchant({ id: 'm2', name: '二饭煲仔饭', category: 'canteen', walkMinutes: 5, tags: ['饭', '热食', '咸香'] }),
+      makeMerchant({ id: 'm3', name: '潮汕牛肉汤粉', category: 'noodle', walkMinutes: 5, tags: ['面', '汤', '清淡'] }),
+      makeMerchant({ id: 'm4', name: '重庆豌杂小面', category: 'noodle', walkMinutes: 7, tags: ['面', '辣', '咸香'] }),
+      makeMerchant({ id: 'm5', name: '芝士烤盘饭', category: 'fastfood', walkMinutes: 5, tags: ['饭', '饱腹', '快手'] }),
+      makeMerchant({ id: 'm6', name: '轻食能量碗', category: 'fastfood', walkMinutes: 7, tags: ['轻食', '清淡', '凉食'] }),
+      makeMerchant({ id: 'm7', name: '南亭粤菜小炒', category: 'restaurant', walkMinutes: 8, tags: ['清淡', '饭', '热食'] }),
+      makeMerchant({ id: 'm8', name: '港式茶餐厅', category: 'restaurant', walkMinutes: 14, tags: ['饭', '咸香', '饮品'] }),
+      makeMerchant({ id: 'm9', name: '广式糖水铺', category: 'dessert', walkMinutes: 5, tags: ['甜品', '凉食', '清淡'] }),
+      makeMerchant({ id: 'm10', name: '四川小吃钵钵鸡', category: 'snack', walkMinutes: 7, tags: ['辣', '快手', '实惠'] }),
+    ];
+
+    const weather = { temp: 23, feelsLike: 23, text: '多云', scene: 'cloudy' as const, humidity: 60 };
+    const topIds: string[] = [];
+
+    for (let i = 0; i < 30; i++) {
+      const date = addDays('2026-11-01', i);
+      const lunchA = scoreAndRecommendMeals({
+        merchants: catalog,
+        meal: 'lunch',
+        weather,
+        schedule: freeSchedule,
+        mood: null,
+        preference: null,
+        feedbacks: [],
+        dailyRandom: { seedKey: 'user-free', date },
+      });
+      // 同一天同一餐重复查询完全稳定
+      const lunchB = scoreAndRecommendMeals({
+        merchants: catalog,
+        meal: 'lunch',
+        weather,
+        schedule: freeSchedule,
+        mood: null,
+        preference: null,
+        feedbacks: [],
+        dailyRandom: { seedKey: 'user-free', date },
+      });
+      expect(lunchB.map((x) => x.merchant.id)).toEqual(lunchA.map((x) => x.merchant.id));
+
+      // 同日午饭与晚饭首推错开
+      const dinner = scoreAndRecommendMeals({
+        merchants: catalog,
+        meal: 'dinner',
+        weather,
+        schedule: freeSchedule,
+        mood: null,
+        preference: null,
+        feedbacks: [],
+        dailyRandom: { seedKey: 'user-free', date },
+      });
+      expect(dinner[0]!.merchant.id).not.toBe(lunchA[0]!.merchant.id);
+
+      topIds.push(lunchA[0]!.merchant.id);
+    }
+
+    // 连续 30 天内，任意相邻两天无安排时首推绝不重复
+    for (let i = 1; i < topIds.length; i++) {
+      expect(topIds[i]).not.toBe(topIds[i - 1]);
+    }
+    // 30 天内应自然轮换到至少 6 家以上不同商家，而不是固定两家来回切
+    expect(new Set(topIds).size).toBeGreaterThanOrEqual(6);
+
+    // 「换一批」排除第一批后能稳定顺延到不重复的下一批
+    const batch1 = scoreAndRecommendMeals({
+      merchants: catalog,
+      meal: 'lunch',
+      weather,
+      schedule: freeSchedule,
+      mood: null,
+      preference: null,
+      feedbacks: [],
+      dailyRandom: { seedKey: 'user-free', date: '2026-11-22' },
+    });
+    const batch2 = scoreAndRecommendMeals({
+      merchants: catalog,
+      meal: 'lunch',
+      weather,
+      schedule: freeSchedule,
+      mood: null,
+      preference: null,
+      feedbacks: [],
+      excludeIds: batch1.map((x) => x.merchant.id),
+      dailyRandom: { seedKey: 'user-free', date: '2026-11-22' },
+    });
+    expect(batch2).toHaveLength(3);
+    for (const item of batch2) {
+      expect(batch1.some((b) => b.merchant.id === item.merchant.id)).toBe(false);
+    }
+  });
+
+  it('仅有 2 家可选商家且连续两天无安排时，也能逐日与午晚交替不重样', () => {
+    const freeSchedule = analyzeMealWindow([], 'lunch', { date: '2026-11-22', todos: [] });
+    const pair = [
+      makeMerchant({ id: 'a', name: '一饭烧腊', category: 'canteen' }),
+      makeMerchant({ id: 'b', name: '二饭汤粉', category: 'noodle' }),
+    ];
+
+    const d1Lunch = scoreAndRecommendMeals({
+      merchants: pair,
+      meal: 'lunch',
+      weather: null,
+      schedule: freeSchedule,
+      mood: null,
+      preference: null,
+      feedbacks: [],
+      dailyRandom: { seedKey: 'u-pair', date: '2026-11-22' },
+    });
+    const d1Dinner = scoreAndRecommendMeals({
+      merchants: pair,
+      meal: 'dinner',
+      weather: null,
+      schedule: freeSchedule,
+      mood: null,
+      preference: null,
+      feedbacks: [],
+      dailyRandom: { seedKey: 'u-pair', date: '2026-11-22' },
+    });
+    const d2Lunch = scoreAndRecommendMeals({
+      merchants: pair,
+      meal: 'lunch',
+      weather: null,
+      schedule: freeSchedule,
+      mood: null,
+      preference: null,
+      feedbacks: [],
+      dailyRandom: { seedKey: 'u-pair', date: '2026-11-23' },
+    });
+
+    expect(d1Dinner[0]!.merchant.id).not.toBe(d1Lunch[0]!.merchant.id);
+    expect(d2Lunch[0]!.merchant.id).not.toBe(d1Lunch[0]!.merchant.id);
   });
 });

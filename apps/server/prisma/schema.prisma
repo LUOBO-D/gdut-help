@@ -61,6 +61,7 @@ model User {
   classNotifyLogs       ClassNotifyLog[]
   timetableShares       TimetableShare[]
   exams                 Exam[]
+  fitnessRecords        FitnessRecord[]
 
   @@map("users")
 }
@@ -557,4 +558,41 @@ model Exam {
   @@index([userId, semesterId])
   @@index([userId, examDate])
   @@map("exams")
+}
+
+enum FitnessGender {
+  male
+  female
+}
+
+/// 个人体测成绩档案（按用户+学年唯一，支持手动录入与多格式粘贴导入，自动按国家标准算分）
+model FitnessRecord {
+  id                 String        @id @default(uuid()) @db.Uuid
+  userId             String        @map("user_id") @db.Uuid
+  /// 学年，例如 '2025-2026'
+  academicYear       String        @map("academic_year")
+  /// 年级：1 大一 / 2 大二 / 3 大三 / 4 大四
+  gradeYear          Int           @map("grade_year") @db.SmallInt
+  gender             FitnessGender
+  heightCm           Float?        @map("height_cm")
+  weightKg           Float?        @map("weight_kg")
+  lungCapacityMl     Int?          @map("lung_capacity_ml")
+  sprint50mSec       Float?        @map("sprint_50m_sec")
+  sitAndReachCm      Float?        @map("sit_and_reach_cm")
+  standingLongJumpCm Int?          @map("standing_long_jump_cm")
+  strengthCount      Int?          @map("strength_count") @db.SmallInt
+  enduranceSec       Int?          @map("endurance_sec") @db.SmallInt
+  exempt             Boolean       @default(false)
+  officialTotal      Float?        @map("official_total")
+  testedAt           String?       @map("tested_at")
+  note               String?
+  source             CourseSource  @default(manual)
+  createdAt          DateTime      @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt          DateTime      @updatedAt @map("updated_at") @db.Timestamptz
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, academicYear])
+  @@index([userId, gradeYear])
+  @@map("fitness_records")
 }

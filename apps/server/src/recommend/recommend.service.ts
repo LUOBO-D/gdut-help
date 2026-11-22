@@ -13,9 +13,11 @@ import {
   today,
   type DiningContext,
   type FeedbackSignal,
+  type MealExamSignal,
   type MealFeedback,
   type MealFeedbackInput,
   type MealRecommendationResponse,
+  type MealTodoSignal,
   type MealType,
   type MoodInput,
   type MoodLog,
@@ -172,16 +174,26 @@ export class RecommendService {
     const campus = findCampus(campusId) ?? findCampus(DEFAULT_CAMPUS_ID)!;
 
     const sinceDate = addDays(date, -14);
-    const [allMerchants, prefRow, moodRow, feedbackRows, timetableData] = await Promise.all([
-      this.merchants.listApprovedForCampus(campusId),
-      this.prisma.userPreference.findUnique({ where: { userId } }),
-      this.prisma.moodLog.findUnique({ where: { userId_date: { userId, date } } }),
-      this.prisma.mealFeedback.findMany({
-        where: { userId, date: { gte: sinceDate } },
-        orderBy: { createdAt: 'desc' },
-      }),
-      this.timetable.data(userId),
-    ]);
+    const [allMerchants, prefRow, moodRow, feedbackRows, timetableData, openTodoRows, todayExamRows] =
+      await Promise.all([
+        this.merchants.listApprovedForCampus(campusId),
+        this.prisma.userPreference.findUnique({ where: { userId } }),
+        this.prisma.moodLog.findUnique({ where: { userId_date: { userId, date } } }),
+        this.prisma.mealFeedback.findMany({
+          where: { userId, date: { gte: sinceDate } },
+          orderBy: { createdAt: 'desc' },
+        }),
+        this.timetable.data(userId),
+        this.prisma.todo.findMany({
+          where: { userId, completedAt: null },
+          select: { title: true, priority: true, dueAt: true },
+          take: 100,
+        }),
+        this.prisma.exam.findMany({
+          where: { userId, examDate: date },
+          select: { courseName: true, startTime: true, endTime: true, location: true },
+        }),
+      ]);
 
     // 天气服务失败时优雅降级，不影响推荐正常返回
     let weatherNow: WeatherNow | null = null;
@@ -193,7 +205,22 @@ export class RecommendService {
     }
 
     const todaySessions = sessionsOn(timetableData, date, campusId);
-    const schedule = analyzeMealWindow(todaySessions, meal);
+    const todoSignals: MealTodoSignal[] = openTodoRows.map((t) => ({
+      title: t.title,
+      priority: t.priority,
+      dueAt: t.dueAt ? t.dueAt.toISOString() : null,
+    }));
+    const examSignals: MealExamSignal[] = todayExamRows.map((ex) => ({
+      courseName: ex.courseName,
+      startTime: ex.startTime,
+      endTime: ex.endTime,
+      location: ex.location,
+    }));
+    const schedule = analyzeMealWindow(todaySessions, meal, {
+      todos: todoSignals,
+      exams: examSignals,
+      date,
+    });
 
     const feedbackSignals: FeedbackSignal[] = feedbackRows.map((fb) => ({
       merchantId: fb.merchantId,
@@ -204,6 +231,7 @@ export class RecommendService {
 
     const pref = toPreference(prefRow);
     const mood = moodRow ? toMoodLog(moodRow) : null;
+    const dailyRandom = { seedKey: userId, date };
 
     // 计算无 excludeIds 时总可选商家，便于前端判断「换一批」是否已看完
     const allEligible = scoreAndRecommendMeals({
@@ -215,6 +243,7 @@ export class RecommendService {
       preference: pref,
       feedbacks: feedbackSignals,
       context: opts.context,
+      dailyRandom,
       limit: allMerchants.length || 1,
     });
 
@@ -228,6 +257,7 @@ export class RecommendService {
       feedbacks: feedbackSignals,
       context: opts.context,
       excludeIds: opts.excludeIds,
+      dailyRandom,
       limit: 3,
     });
 

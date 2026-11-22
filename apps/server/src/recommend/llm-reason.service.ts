@@ -42,7 +42,7 @@ export class LlmReasonService {
     if (!this.env.LLM_API_KEY || items.length === 0) return items;
 
     const ids = items.map((i) => i.merchant.id).join(',');
-    const cacheKey = `${opts.userId}|${opts.date}|${opts.meal}|${opts.mood ?? ''}|${ids}`;
+    const cacheKey = `${opts.userId}|${opts.date}|${opts.meal}|${opts.mood ?? ''}|${opts.scheduleHint ?? ''}|${ids}`;
     const cached = this.cache.get(cacheKey);
     if (cached && Date.now() - cached.at < CACHE_TTL_MS) {
       return this.applyReasons(items, cached.reasons);
@@ -116,7 +116,7 @@ export class LlmReasonService {
           {
             role: 'system',
             content:
-              '你是广东工业大学校园生活助手。根据学生的天气、课表空档、心情和候选商家，为每个候选写一句自然、贴心、不夸张的中文推荐理由（每句不超过 28 字）。严格输出 JSON：{"reasons":{"商家id":"一句话理由"}}。',
+              '你是广东工业大学校园生活助手。根据学生的天气、课表与待办安排、心情和候选商家，为每个候选写一句自然、贴心、不夸张的中文推荐理由（每句不超过 28 字）。严格输出 JSON：{"reasons":{"商家id":"一句话理由"}}。',
           },
           { role: 'user', content: userPrompt },
         ],

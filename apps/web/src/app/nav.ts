@@ -23,6 +23,7 @@ export const ME: NavItem = { to: '/me', label: '我的', icon: UserIcon };
 
 /** 当前路径在导航中的序号，「我的」排在最后 */
 export function navIndex(pathname: string): number {
+  if (pathname.startsWith('/fitness')) return TABS.length;
   const all = [...TABS, ME];
   const i = all.findIndex((t) => (t.to === '/' ? pathname === '/' : pathname.startsWith(t.to)));
   return i === -1 ? 0 : i;

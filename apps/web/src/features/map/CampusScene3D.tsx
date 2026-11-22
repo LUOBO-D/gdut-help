@@ -24,10 +24,14 @@ import {
   type FacadeStyle,
 } from './campus-textures';
 
+export type CameraFollowMode = 'off' | 'heading' | 'north';
+
 export interface CameraTarget {
   x: number;
   z: number;
   distance?: number;
+  /** 目标相机朝向（弧度，0=正北，-π/2=正东） */
+  yaw?: number;
   /** 递增序号用于触发一次平滑飞抵动画 */
   seq: number;
 }
@@ -47,10 +51,16 @@ interface CampusScene3DProps {
   routeEndId: string | null;
   userFix: GeoFix | null;
   userInsideCampus: boolean;
+  /** 融合后的前进方向（地理方位角：0°=正北, 90°=正东, 180°=正南, 270°=正西） */
+  navHeading?: number | null;
+  /** 导航相机跟随模式：off=自由浏览, heading=车头/前进方向朝上, north=正北朝上跟随 */
+  followMode?: CameraFollowMode;
   cameraTarget: CameraTarget | null;
   controlApiRef: MutableRefObject<CameraControlApi | null>;
   onSelectBuilding: (building: CampusBuilding) => void;
   onYawChange?: (yawRad: number) => void;
+  /** 用户手动拖拽地图时触发，用于优雅暂停自动跟随而不抢手指 */
+  onUserPan?: () => void;
 }
 
 interface CameraState {
@@ -155,6 +165,13 @@ const MAX_DIST = 2250;
 
 function clamp(v: number, min: number, max: number) {
   return Math.max(min, Math.min(max, v));
+}
+
+/** 计算两个弧度角之间的最短有符号差值（范围 [-π, π]，避免跨 ±180° 反向大旋转） */
+function shortestAngleDelta(fromRad: number, toRad: number): number {
+  let d = ((toRad - fromRad + Math.PI) % (Math.PI * 2)) - Math.PI;
+  if (d < -Math.PI) d += Math.PI * 2;
+  return d;
 }
 
 /** 根据地形多边形创建 3D 几何体（水系采用样条平滑，球场自动归一化顶面 UV） */
@@ -1296,27 +1313,45 @@ function RouteOverlay3D({ route, lighting }: { route: CampusRoutePlan; lighting:
 }
 
 /** 实时 GPS 蓝色脉冲定位点 + 精度圈 + 朝向扇形（带丝滑位置与方向插值） */
-function UserLocationBeacon({ fix }: { fix: GeoFix }) {
+function UserLocationBeacon({ fix, navHeading }: { fix: GeoFix; navHeading?: number | null }) {
   const groupRef = useRef<THREE.Group>(null);
+  const headingRef = useRef<THREE.Group>(null);
   const ringRef = useRef<THREE.Mesh>(null);
   const targetRef = useRef(latLngToLocal(fix.lat, fix.lng));
   const initializedRef = useRef(false);
+  const headingInitRef = useRef(false);
+  const activeHeading = navHeading ?? fix.heading;
+  const headingTargetRef = useRef<number | null>(activeHeading);
   const accRadius = clamp(fix.accuracy, 10, 65);
 
   useEffect(() => {
     targetRef.current = latLngToLocal(fix.lat, fix.lng);
   }, [fix.lat, fix.lng]);
 
+  useEffect(() => {
+    headingTargetRef.current = activeHeading;
+  }, [activeHeading]);
+
   useFrame(({ clock }, delta) => {
+    const dt = Math.min(delta, 0.05);
+    const k = 1 - Math.exp(-dt * 10);
     if (groupRef.current) {
       const t = targetRef.current;
       if (!initializedRef.current) {
         groupRef.current.position.set(t.x, 1.8, t.z);
         initializedRef.current = true;
       } else {
-        const k = 1 - Math.exp(-Math.min(delta, 0.05) * 10);
         groupRef.current.position.x += (t.x - groupRef.current.position.x) * k;
         groupRef.current.position.z += (t.z - groupRef.current.position.z) * k;
+      }
+    }
+    if (headingRef.current && headingTargetRef.current !== null) {
+      const targetRotY = (-headingTargetRef.current * Math.PI) / 180;
+      if (!headingInitRef.current) {
+        headingRef.current.rotation.y = targetRotY;
+        headingInitRef.current = true;
+      } else {
+        headingRef.current.rotation.y += shortestAngleDelta(headingRef.current.rotation.y, targetRotY) * k;
       }
     }
     if (!ringRef.current) return;
@@ -1338,11 +1373,11 @@ function UserLocationBeacon({ fix }: { fix: GeoFix }) {
         <ringGeometry args={[8, 12, 24]} />
         <meshBasicMaterial color="#60a5fa" transparent opacity={0.5} side={THREE.DoubleSide} />
       </mesh>
-      {fix.heading !== null && (
-        <group rotation={[0, (-fix.heading * Math.PI) / 180, 0]}>
+      {activeHeading !== null && (
+        <group ref={headingRef} rotation={[0, (-activeHeading * Math.PI) / 180, 0]}>
           <mesh position={[0, 1.4, -18]} rotation={[-Math.PI / 2, 0, 0]}>
-            <coneGeometry args={[8.5, 22, 3]} />
-            <meshBasicMaterial color="#60a5fa" transparent opacity={0.5} />
+            <coneGeometry args={[9.5, 24, 3]} />
+            <meshBasicMaterial color="#60a5fa" transparent opacity={0.58} />
           </mesh>
         </group>
       )}
@@ -1358,11 +1393,15 @@ function UserLocationBeacon({ fix }: { fix: GeoFix }) {
   );
 }
 
-/** 相机控制器 + 零重渲染 2D 标签投影与屏幕安全区碰撞避让 */
+/** 相机控制器 + 前进方向追尾视角 + 零重渲染 2D 标签投影与屏幕安全区碰撞避让 */
 function CameraAndLabelsRig({
   stateRef,
   view3d,
   cameraTarget,
+  userFix,
+  userInsideCampus,
+  navHeading,
+  followMode,
   controlApiRef,
   labelElsRef,
   wmElsRef,
@@ -1374,6 +1413,10 @@ function CameraAndLabelsRig({
   stateRef: MutableRefObject<CameraState>;
   view3d: boolean;
   cameraTarget: CameraTarget | null;
+  userFix: GeoFix | null;
+  userInsideCampus: boolean;
+  navHeading: number | null;
+  followMode: CameraFollowMode;
   controlApiRef: MutableRefObject<CameraControlApi | null>;
   labelElsRef: MutableRefObject<Map<string, HTMLButtonElement>>;
   wmElsRef: MutableRefObject<Map<string, HTMLSpanElement>>;
@@ -1385,6 +1428,7 @@ function CameraAndLabelsRig({
   const { camera, size } = useThree();
   const lastSeqRef = useRef(-1);
   const lastYawReported = useRef(0);
+  const prevFollowModeRef = useRef<CameraFollowMode>('off');
   const projVec = useMemo(() => new THREE.Vector3(), []);
   const orderedBuildings = useMemo(
     () =>
@@ -1416,18 +1460,55 @@ function CameraAndLabelsRig({
     if (cameraTarget.distance !== undefined) {
       stateRef.current.goalDistance = clamp(cameraTarget.distance, MIN_DIST, MAX_DIST);
     }
+    if (cameraTarget.yaw !== undefined) {
+      stateRef.current.goalYaw = cameraTarget.yaw;
+    }
   }, [cameraTarget, stateRef]);
+
+  // 刚切入导航跟走模式时平滑拉近至 3D 追尾视距（保留用户后续双指缩放自由度）
+  useEffect(() => {
+    const prev = prevFollowModeRef.current;
+    prevFollowModeRef.current = followMode;
+    if (prev === 'off' && followMode !== 'off') {
+      stateRef.current.goalDistance = clamp(Math.min(stateRef.current.goalDistance, 250), 190, 275);
+    }
+  }, [followMode, stateRef]);
+
+  // 实时跟走模式下持续将镜头目标锁定到「用户位置前方 32m」并旋转至前进方向
+  useEffect(() => {
+    if (followMode === 'off' || stateRef.current.dragging) return;
+    if (userFix && userInsideCampus) {
+      const u = latLngToLocal(userFix.lat, userFix.lng);
+      if (followMode === 'heading' && navHeading !== null) {
+        const hRad = (navHeading * Math.PI) / 180;
+        const lookAhead = view3d ? 34 : 18;
+        stateRef.current.goalX = clamp(u.x + Math.sin(hRad) * lookAhead, CLAMP_X[0], CLAMP_X[1]);
+        stateRef.current.goalZ = clamp(u.z - Math.cos(hRad) * lookAhead, CLAMP_Z[0], CLAMP_Z[1]);
+        stateRef.current.goalYaw = -hRad;
+      } else {
+        stateRef.current.goalX = clamp(u.x, CLAMP_X[0], CLAMP_X[1]);
+        stateRef.current.goalZ = clamp(u.z, CLAMP_Z[0], CLAMP_Z[1]);
+        if (followMode === 'north') {
+          stateRef.current.goalYaw = 0;
+        }
+      }
+    } else if (followMode === 'heading' && navHeading !== null) {
+      // 尚未锁到校内位置但已有路线初始方向时，先提前转向前进方向
+      stateRef.current.goalYaw = (-navHeading * Math.PI) / 180;
+    }
+  }, [followMode, navHeading, stateRef, userFix, userInsideCampus, view3d]);
 
   useFrame((_, delta) => {
     const st = stateRef.current;
     const dt = Math.min(delta, 0.05);
-    const k = 1 - Math.exp(-dt * 10);
+    const k = 1 - Math.exp(-dt * 8.5);
 
     st.x += (st.goalX - st.x) * k;
     st.z += (st.goalZ - st.z) * k;
     st.distance += (st.goalDistance - st.distance) * k;
-    st.yaw += (st.goalYaw - st.yaw) * k;
-    const targetPitch = view3d ? 0.8 : 1.5;
+    st.yaw += shortestAngleDelta(st.yaw, st.goalYaw) * k;
+    // 导航前进视角自动放低俯仰角（约 31°），更贴近真实 3D 导航追尾透视
+    const targetPitch = view3d ? (followMode === 'heading' ? 0.54 : 0.8) : 1.5;
     st.pitch += (targetPitch - st.pitch) * k;
 
     const horiz = Math.cos(st.pitch) * st.distance;
@@ -1436,7 +1517,7 @@ function CameraAndLabelsRig({
     camera.lookAt(st.x, 0, st.z);
     camera.updateMatrixWorld();
 
-    if (onYawChange && Math.abs(st.yaw - lastYawReported.current) > 0.04) {
+    if (onYawChange && Math.abs(shortestAngleDelta(lastYawReported.current, st.yaw)) > 0.04) {
       lastYawReported.current = st.yaw;
       onYawChange(st.yaw);
     }
@@ -1536,6 +1617,7 @@ function CampusWorldContent({
   routeEndId,
   userFix,
   userInsideCampus,
+  navHeading,
   onSelectBuilding,
 }: {
   lighting: CampusLightingPalette;
@@ -1545,6 +1627,7 @@ function CampusWorldContent({
   routeEndId: string | null;
   userFix: GeoFix | null;
   userInsideCampus: boolean;
+  navHeading: number | null;
   onSelectBuilding: (b: CampusBuilding) => void;
 }) {
   const textures = useMemo(() => createCampusTextureSet(lighting.isDark), [lighting.isDark]);
@@ -1602,7 +1685,7 @@ function CampusWorldContent({
       </group>
 
       {route && <RouteOverlay3D route={route} lighting={lighting} />}
-      {userFix && userInsideCampus && <UserLocationBeacon fix={userFix} />}
+      {userFix && userInsideCampus && <UserLocationBeacon fix={userFix} navHeading={navHeading} />}
     </>
   );
 }
@@ -1616,14 +1699,21 @@ export function CampusScene3D({
   routeEndId,
   userFix,
   userInsideCampus,
+  navHeading = null,
+  followMode = 'off',
   cameraTarget,
   controlApiRef,
   onSelectBuilding,
   onYawChange,
+  onUserPan,
 }: CampusScene3DProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const labelElsRef = useRef<Map<string, HTMLButtonElement>>(new Map());
   const wmElsRef = useRef<Map<string, HTMLSpanElement>>(new Map());
+  const onUserPanRef = useRef(onUserPan);
+  useEffect(() => {
+    onUserPanRef.current = onUserPan;
+  }, [onUserPan]);
   const stateRef = useRef<CameraState>({
     x: -40,
     z: 60,
@@ -1646,6 +1736,8 @@ export function CampusScene3D({
     let prevPinchDist = 0;
     let prevPinchAngle = 0;
     let rotateMouse = false;
+    let panAccumPx = 0;
+    let panReported = false;
 
     const onPointerDown = (e: PointerEvent) => {
       if ((e.target as HTMLElement).closest('button[data-map-label]')) return;
@@ -1654,6 +1746,8 @@ export function CampusScene3D({
       stateRef.current.dragging = true;
       if (pointers.size === 1) {
         prevCenter = { x: e.clientX, y: e.clientY };
+        panAccumPx = 0;
+        panReported = false;
       } else if (pointers.size === 2) {
         const [a, b] = Array.from(pointers.values());
         prevCenter = { x: (a!.x + b!.x) / 2, y: (a!.y + b!.y) / 2 };
@@ -1671,6 +1765,11 @@ export function CampusScene3D({
         const dx = e.clientX - prevCenter.x;
         const dy = e.clientY - prevCenter.y;
         prevCenter = { x: e.clientX, y: e.clientY };
+        panAccumPx += Math.hypot(dx, dy);
+        if (!panReported && panAccumPx > 12) {
+          panReported = true;
+          onUserPanRef.current?.();
+        }
         if (rotateMouse) {
           st.goalYaw -= dx * 0.007;
           return;
@@ -1776,6 +1875,7 @@ export function CampusScene3D({
           routeEndId={routeEndId}
           userFix={userFix}
           userInsideCampus={userInsideCampus}
+          navHeading={navHeading}
           onSelectBuilding={onSelectBuilding}
         />
 
@@ -1783,6 +1883,10 @@ export function CampusScene3D({
           stateRef={stateRef}
           view3d={view3d}
           cameraTarget={cameraTarget}
+          userFix={userFix}
+          userInsideCampus={userInsideCampus}
+          navHeading={navHeading}
+          followMode={followMode}
           controlApiRef={controlApiRef}
           labelElsRef={labelElsRef}
           wmElsRef={wmElsRef}

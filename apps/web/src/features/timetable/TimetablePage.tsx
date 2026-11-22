@@ -189,7 +189,15 @@ export function TimetablePage() {
 
       <div className="mb-3 flex items-center justify-between gap-3">
         <ViewSwitch value={view} onChange={changeView} examCount={upcomingExamCount} />
-        {view !== 'exam' && (
+        {view === 'exam' ? (
+          <Link
+            to="/fitness"
+            className="glass-thin inline-flex items-center gap-1 rounded-full px-3.5 py-2 text-xs font-medium text-accent transition-colors hover:bg-white/25"
+          >
+            <span>体测成绩</span>
+            <ChevronRightIcon size={14} />
+          </Link>
+        ) : (
           <div className="flex items-center gap-1">
             <button type="button" className="glass-thin grid size-9 place-items-center rounded-full!" aria-label="上一周" disabled={shown <= 1} onClick={() => goWeek(shown - 1)}>
               <ChevronLeftIcon size={18} />

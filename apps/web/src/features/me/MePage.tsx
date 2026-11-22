@@ -1,6 +1,8 @@
 import {
   changePasswordSchema,
   deleteAccountSchema,
+  estimateGraduationFitness,
+  FITNESS_LEVEL_LABELS,
   today,
   updateProfileSchema,
   type UserDataExport,
@@ -19,7 +21,7 @@ import { api, ApiError, deleteAccount, logout, logoutAll } from '../../lib/api';
 import { useAuth } from '../../lib/auth-store';
 import { useOtaStore } from '../../lib/ota-store';
 import { DEFAULT_API_ORIGIN, getApiOrigin, isNative, normalizeApiOrigin, setApiOriginOverride } from '../../lib/platform';
-import { usePreferences } from '../../lib/queries';
+import { useFitnessRecords, usePreferences } from '../../lib/queries';
 import { SCENE_STYLES, SCENES, type Scene } from '../../lib/scene';
 import { toast } from '../../lib/toast-store';
 import { useUi } from '../../lib/ui-store';
@@ -37,7 +39,15 @@ export function MePage() {
   const [loggingOut, setLoggingOut] = useState(false);
   const [prefOpen, setPrefOpen] = useState(false);
   const prefQuery = usePreferences();
+  const fitnessQuery = useFitnessRecords();
   if (!user) return null;
+
+  const fitnessRecords = fitnessQuery.data?.records ?? [];
+  const fitnessEst = estimateGraduationFitness(fitnessRecords);
+  const fitnessSummary =
+    fitnessEst.score !== null
+      ? `已收录 ${fitnessRecords.length} 学年 · ${fitnessEst.hasSenior ? '毕业总评' : '毕业估算'} ${fitnessEst.score.toFixed(1)} 分（${FITNESS_LEVEL_LABELS[fitnessEst.level]}）`
+      : '收录历年体测成绩，自动按国家标准算分与估算毕业总评';
 
   const pref = prefQuery.data;
   const prefSummary =
@@ -59,6 +69,15 @@ export function MePage() {
       <div className="space-y-4">
         <ProfileCard user={user} />
         <CampusPicker />
+        <GlassCard className="p-5">
+          <Link to="/fitness" className="flex w-full items-center justify-between gap-3 text-left">
+            <div className="min-w-0">
+              <h2 className="text-[15px] font-semibold">体测成绩档案</h2>
+              <p className="mt-1 truncate text-sm text-fg-muted">{fitnessSummary}</p>
+            </div>
+            <ChevronRightIcon size={18} className="shrink-0 text-fg-muted" />
+          </Link>
+        </GlassCard>
         <GlassCard className="p-5">
           <button type="button" className="flex w-full items-center justify-between gap-3 text-left" onClick={() => setPrefOpen(true)}>
             <div className="min-w-0">

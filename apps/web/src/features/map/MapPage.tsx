@@ -35,10 +35,12 @@ import {
 } from '../../components/icons';
 import { useAuth } from '../../lib/auth-store';
 import {
+  computeBearingDeg,
   getCachedLocation,
   getCurrentLocation,
   hasLocationPermission,
   LocationError,
+  watchCompassHeading,
   watchLocation,
   type GeoFix,
 } from '../../lib/location';
@@ -51,7 +53,7 @@ import {
   MAP_TIME_MODE_LABELS,
   type MapTimeMode,
 } from './campus-lighting';
-import type { CameraControlApi, CameraTarget } from './CampusScene3D';
+import type { CameraControlApi, CameraFollowMode, CameraTarget } from './CampusScene3D';
 
 const CampusScene3D = lazy(() => import('./CampusScene3D').then((m) => ({ default: m.CampusScene3D })));
 
@@ -74,6 +76,18 @@ type StartSpec = { kind: 'gps' } | { kind: 'building'; buildingId: string };
 
 function formatDistance(m: number): string {
   return m >= 1000 ? `${(m / 1000).toFixed(2)} km` : `${Math.round(m)} m`;
+}
+
+function computeRouteInitialHeading(route: CampusRoutePlan | null): number | null {
+  if (!route || route.waypoints.length < 2) return null;
+  const startWp = route.waypoints[0]!;
+  for (let i = 1; i < route.waypoints.length; i++) {
+    const nextWp = route.waypoints[i]!;
+    if (distanceMeters(startWp, nextWp) >= 4) {
+      return computeBearingDeg(startWp, nextWp);
+    }
+  }
+  return computeBearingDeg(startWp, route.waypoints[route.waypoints.length - 1]!);
 }
 
 interface InitialDeepLink {
@@ -175,11 +189,14 @@ export function MapPage() {
 
   // GPS 实时定位（启动时优先复用近期缓存，并在已授权前提下后台静默预热，实现导航秒开）
   const [userFix, setUserFix] = useState<GeoFix | null>(() => getCachedLocation(30_000));
+  const [compassHeading, setCompassHeading] = useState<number | null>(null);
   const [locating, setLocating] = useState(false);
   const [tracking, setTracking] = useState(false);
+  const [followMode, setFollowMode] = useState<CameraFollowMode>('off');
   const stopWatchRef = useRef<(() => void) | null>(null);
   const lastRerouteAtRef = useRef(0);
   const manualStartRef = useRef(false);
+  const arrivedForRef = useRef<string | null>(null);
 
   // 相机控制
   const controlApiRef = useRef<CameraControlApi | null>(null);
@@ -196,6 +213,12 @@ export function MapPage() {
     () => (userFix && userInsideCampus ? findNearestBuilding(userFix.lat, userFix.lng, 90) : null),
     [userFix, userInsideCampus],
   );
+
+  // 实时导航期间开启手机电子罗盘监听，站立原地转身也能平滑转向
+  useEffect(() => {
+    if (!tracking) return;
+    return watchCompassHeading((deg) => setCompassHeading(deg));
+  }, [tracking]);
 
   const flyTo = useCallback((lat: number, lng: number, distance?: number) => {
     const p = latLngToLocal(lat, lng);
@@ -284,11 +307,21 @@ export function MapPage() {
     return planCampusRoute(startEp, { kind: 'building', buildingId: endBuildingId }, routeMode);
   }, [endBuildingId, navActive, routeMode, startSpec, userFix, userInsideCampus]);
 
-  // 供 GPS 实时回调读取最新导航快照（事件驱动检测偏航，避免在 effect 里同步 setState）
-  const navSnapshotRef = useRef({ navActive, activeRoute });
+  // 路线首段前进方位角（刚点开始导航、尚未迈步或无磁力计时用于瞬间对准前进方向）
+  const routeInitialHeading = computeRouteInitialHeading(activeRoute);
+
+  // 融合前进方向：行进航向/GPS朝向 > 实时电子罗盘 > 规划路线首段方向
+  const navHeading = userFix?.heading ?? (tracking ? compassHeading : null) ?? routeInitialHeading;
+
+  // 供 GPS 实时回调读取最新导航快照（事件驱动检测偏航与抵达，避免在 effect 里同步 setState）
+  const navSnapshotRef = useRef({ navActive, activeRoute, endBuilding });
   useEffect(() => {
-    navSnapshotRef.current = { navActive, activeRoute };
-  }, [navActive, activeRoute]);
+    navSnapshotRef.current = { navActive, activeRoute, endBuilding };
+  }, [navActive, activeRoute, endBuilding]);
+
+  const handleUserPan = useCallback(() => {
+    setFollowMode((prev) => (prev === 'off' ? prev : 'off'));
+  }, []);
 
   const handleSelectBuilding = useCallback(
     (b: CampusBuilding) => {
@@ -306,10 +339,12 @@ export function MapPage() {
       }
       if (navActive) {
         setEndBuildingId(b.id);
+        arrivedForRef.current = null;
+        if (tracking && followMode !== 'off') return;
       }
       flyTo(b.lat, b.lng, 430);
     },
-    [flyTo, navActive, pickingStart],
+    [flyTo, followMode, navActive, pickingStart, tracking],
   );
 
   const startNavigationTo = useCallback(
@@ -366,6 +401,12 @@ export function MapPage() {
 
   const handleLocateOnce = async () => {
     hapticLight();
+    // 导航追踪中点定位键：直接一键回正到「前进方向跟随视角」
+    if (tracking && userFix && userInsideCampus) {
+      setFollowMode('heading');
+      toast.info('已回到前进方向视角');
+      return;
+    }
     setLocating(true);
     let flewOnFastFix = false;
     try {
@@ -409,15 +450,20 @@ export function MapPage() {
       stopWatchRef.current?.();
       stopWatchRef.current = null;
       setTracking(false);
-      toast.info('已停止实时定位追踪');
+      setFollowMode('off');
+      setCompassHeading(null);
+      controlApiRef.current?.resetNorth();
+      toast.info('已结束实时导航');
       return;
     }
     setLocating(true);
-    let centered = false;
+    // 立即切入前进方向 3D 追尾视角，不等定位回调才转视角
+    setFollowMode('heading');
+    arrivedForRef.current = null;
+    let announcedStart = false;
     let notifiedOutside = false;
-    let lastAccuracy = Infinity;
     try {
-      // 直接启动高频实时监听（内置 0ms 缓存回放 + 0.3s 快速首帧），不再先干等 12s 冷启动
+      // 启动自愈保活实时定位（内置 0ms 缓存 + 0.3s 快速首帧 + 断流自动重连 + 看门狗）
       const stop = await watchLocation(
         (fix) => {
           setUserFix(fix);
@@ -426,24 +472,27 @@ export function MapPage() {
           if (inside) {
             manualStartRef.current = false;
             setStartSpec((prev) => (prev.kind === 'gps' ? prev : { kind: 'gps' }));
-            const upgradedToPrecise = lastAccuracy > 45 && fix.accuracy <= 25;
-            if (!centered || upgradedToPrecise) {
-              const firstLock = !centered;
-              centered = true;
-              flyTo(fix.lat, fix.lng, 360);
-              if (firstLock) {
-                const near = findNearestBuilding(fix.lat, fix.lng, 90);
-                toast.success(
-                  near
-                    ? `已开启实时跟走 · 近${near.building.shortName} (±${fix.accuracy}m)`
-                    : `已开启校内实时跟走导航 (±${fix.accuracy}m)`,
-                );
+            if (!announcedStart) {
+              announcedStart = true;
+              const near = findNearestBuilding(fix.lat, fix.lng, 90);
+              toast.success(
+                near
+                  ? `已开始导航（前进视角）· 近${near.building.shortName} (±${fix.accuracy}m)`
+                  : `已开始校内实时导航（前进视角 ±${fix.accuracy}m）`,
+              );
+            }
+
+            const snap = navSnapshotRef.current;
+            // 抵达目标楼栋提示（仅触发一次）
+            if (snap.navActive && snap.endBuilding && arrivedForRef.current !== snap.endBuilding.id) {
+              const distToEnd = distanceMeters(fix, snap.endBuilding);
+              if (distToEnd <= 24 && fix.accuracy <= 35) {
+                arrivedForRef.current = snap.endBuilding.id;
+                toast.success(`已到达「${snap.endBuilding.shortName}」附近！`);
               }
             }
-            lastAccuracy = fix.accuracy;
 
             // 仅在室外高精度锁星（<=35m）时做偏航重算提醒，避免室内粗略漂移误报
-            const snap = navSnapshotRef.current;
             if (snap.navActive && snap.activeRoute && fix.accuracy <= 35) {
               const offDist = distanceToRouteMeters(fix, snap.activeRoute.waypoints);
               const threshold = Math.max(35, fix.accuracy * 1.2);
@@ -455,6 +504,7 @@ export function MapPage() {
             }
           } else if (!notifiedOutside) {
             notifiedOutside = true;
+            setFollowMode('off');
             toast.info('你当前不在大学城校区内，已为你保留校内手动起点进行路线预览');
           }
         },
@@ -467,6 +517,7 @@ export function MapPage() {
       setTracking(true);
       setLocating(false);
     } catch (err) {
+      setFollowMode('off');
       setLocating(false);
       toast.error(err instanceof LocationError ? err.message : '开启实时定位失败');
     }
@@ -554,10 +605,13 @@ export function MapPage() {
             routeEndId={navActive ? endBuildingId : null}
             userFix={userFix}
             userInsideCampus={userInsideCampus}
+            navHeading={navHeading}
+            followMode={followMode}
             cameraTarget={cameraTarget}
             controlApiRef={controlApiRef}
             onSelectBuilding={handleSelectBuilding}
             onYawChange={(rad) => setYawDeg(Math.round((rad * 180) / Math.PI))}
+            onUserPan={handleUserPan}
           />
         </Suspense>
       </ErrorBoundary>
@@ -712,15 +766,33 @@ export function MapPage() {
           type="button"
           onClick={() => {
             hapticLight();
-            controlApiRef.current?.resetNorth();
+            if (tracking) {
+              const next: CameraFollowMode = followMode === 'heading' ? 'north' : 'heading';
+              setFollowMode(next);
+              if (next === 'north') controlApiRef.current?.resetNorth();
+              toast.info(next === 'heading' ? '已切换：前进方向视角' : '已切换：正北朝上跟随');
+            } else {
+              controlApiRef.current?.resetNorth();
+            }
           }}
-          title="指北复位"
-          className={`grid size-11 place-items-center rounded-2xl ${panelSurface}`}
-          aria-label="指北复位"
+          title={
+            tracking
+              ? followMode === 'heading'
+                ? '当前：前进方向视角（点此切正北朝上）'
+                : '当前：正北朝上（点此切前进方向视角）'
+              : '指北复位'
+          }
+          className={`flex flex-col items-center justify-center rounded-2xl px-2 py-2 text-[10px] font-medium ${
+            tracking && followMode === 'heading'
+              ? 'bg-orange-500 text-white shadow-lg ring-2 ring-white/50'
+              : panelSurface
+          }`}
+          aria-label={tracking ? '切换导航视角模式' : '指北复位'}
         >
-          <span style={{ transform: `rotate(${-yawDeg}deg)`, display: 'inline-flex', transition: 'transform 150ms' }}>
-            <CompassIcon size={19} />
+          <span style={{ transform: `rotate(${yawDeg}deg)`, display: 'inline-flex', transition: 'transform 150ms' }}>
+            <CompassIcon size={18} />
           </span>
+          {tracking && <span className="mt-0.5 leading-none">{followMode === 'heading' ? '车头' : '正北'}</span>}
         </button>
 
         <div className={`flex flex-col overflow-hidden rounded-2xl ${panelSurface}`}>
@@ -768,6 +840,23 @@ export function MapPage() {
         }`}
       >
         <div className="mx-auto max-w-xl">
+          {/* 实时导航中被用户手动拖离视角时，显示一键回正前进视角胶囊 */}
+          {tracking && followMode === 'off' && userInsideCampus && (
+            <div className="mb-2 flex justify-start">
+              <button
+                type="button"
+                onClick={() => {
+                  hapticLight();
+                  setFollowMode('heading');
+                }}
+                className="pointer-events-auto inline-flex items-center gap-1.5 rounded-full bg-blue-600 px-3.5 py-1.5 text-xs font-semibold text-white shadow-lg ring-2 ring-white/50 transition-transform active:scale-95"
+              >
+                <NavigationIcon size={13} />
+                回到前进视角
+              </button>
+            </div>
+          )}
+
           {navActive && endBuilding ? (
             /* ---------- 路线规划与实时跟走面板 ---------- */
             <div className={`pointer-events-auto rounded-3xl p-4 ${panelSurface}`}>
@@ -900,16 +989,24 @@ export function MapPage() {
                   onClick={() => void toggleLiveTracking()}
                 >
                   <NavigationIcon size={14} />
-                  {tracking ? '停止跟走' : '实时跟走'}
+                  {tracking ? '结束导航' : '开始导航'}
                 </Button>
               </div>
 
-              {tracking && (!userFix || userFix.accuracy > 55) && (
-                <p className={`mt-1.5 text-[11px] ${mutedText}`}>
-                  {!userFix
-                    ? '正在快速锁定卫星信号，移至室外开阔处精度更高…'
-                    : `当前处于室内粗略定位（±${userFix.accuracy}m），可点上方「起点」手动校准为所在楼栋`}
-                </p>
+              {tracking && (
+                <div className={`mt-1.5 flex items-center justify-between gap-2 text-[11px] ${mutedText}`}>
+                  <span className="inline-flex min-w-0 items-center gap-1.5 truncate">
+                    <span className="size-1.5 shrink-0 animate-pulse rounded-full bg-emerald-500" aria-hidden />
+                    {!userFix
+                      ? '正在锁定卫星信号，移至室外开阔处精度更高…'
+                      : userFix.accuracy > 55
+                        ? `室内粗略定位（±${userFix.accuracy}m），可点起点手动校准`
+                        : `实时定位持续追踪中 · 精度 ±${userFix.accuracy}m`}
+                  </span>
+                  <span className="shrink-0 font-medium text-orange-500">
+                    {followMode === 'heading' ? '前进视角' : followMode === 'north' ? '正北跟随' : '自由浏览'}
+                  </span>
+                </div>
               )}
 
               {/* 关键通道提示（天桥 / 隧道） + 可展开分步文字指引 */}

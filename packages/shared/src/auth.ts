@@ -169,6 +169,24 @@ export interface UserDataExport {
     note: string | null;
     source: string;
   }[];
+  fitnessRecords?: {
+    academicYear: string;
+    gradeYear: number;
+    gender: string;
+    heightCm: number | null;
+    weightKg: number | null;
+    lungCapacityMl: number | null;
+    sprint50mSec: number | null;
+    sitAndReachCm: number | null;
+    standingLongJumpCm: number | null;
+    strengthCount: number | null;
+    enduranceSec: number | null;
+    exempt: boolean;
+    officialTotal: number | null;
+    testedAt: string | null;
+    note: string | null;
+    source: string;
+  }[];
   todos: {
     title: string;
     note: string | null;

@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { CAMPUSES } from './gdut.js';
+import { addDays, daysBetween, today } from './time.js';
 import type { ClassSession } from './timetable.js';
 import type { WeatherNow } from './weather.js';
 
@@ -407,59 +408,151 @@ export function findSimilarMerchants(
 }
 
 // ============================================================
-// 纯逻辑：课表空档分析与规则打分推荐（docs/03-backend.md 4.3）
+// 纯逻辑：课表 / 待办 / 考试空档分析与每日随机打分推荐（docs/03-backend.md 4.3）
 // ============================================================
 
 export function defaultMealForHour(beijingHour: number): MealType {
   return beijingHour < 14 ? 'lunch' : 'dinner';
 }
 
+export interface MealTodoSignal {
+  title: string;
+  /** 1 最高 … 4 最低 */
+  priority: number;
+  /** ISO 截止时间；无截止时间时为 null */
+  dueAt: string | null;
+}
+
+export interface MealExamSignal {
+  courseName: string;
+  /** 开始时间 'HH:mm' */
+  startTime: string;
+  /** 结束时间 'HH:mm' */
+  endTime: string;
+  location: string | null;
+}
+
+export interface AnalyzeMealWindowOptions {
+  todos?: MealTodoSignal[];
+  exams?: MealExamSignal[];
+  /** 北京日期 'YYYY-MM-DD'，用于识别今日截止待办；省略时从课程时间或当前时间推断 */
+  date?: string;
+}
+
 export interface MealScheduleContext {
-  /** 本餐窗口内的可用吃饭时长（分钟）；无课或无下节限制时为 null */
+  /** 本餐窗口内的可用吃饭时长（分钟）；无课/无紧迫安排限制时为 null */
   availableMinutes: number | null;
-  /** 餐前最后一节课的上课地点 */
+  /** 餐前最后一节课或考试的地点 */
   lastClassLocation: string | null;
   /** 今天总课节块数 */
   classCount: number;
+  /** 今日相关未完成待办数（今日截止 / 已逾期 / 高优待办） */
+  todoCount?: number;
+  /** 临近本餐窗口或今日高紧迫待办数 */
+  urgentTodoCount?: number;
+  /** 是否因待办截止紧凑需要省时快吃 */
+  tightByTodo?: boolean;
+  /** 最需要关注的一条待办标题 */
+  nextTodoTitle?: string | null;
+  /** 今天考试场数 */
+  examCount?: number;
+  /** 本餐前后涉及的考试科目名称 */
+  examName?: string | null;
+  /** 本餐紧接着是否有考试（考前优先清淡稳妥） */
+  examUpcoming?: boolean;
+  /** 今天是否存在课程、待办或考试安排；false 表示彻底空闲日 */
+  hasAnySchedule?: boolean;
   /** 给人看的简短提示 */
   hint: string | null;
 }
 
-/**
- * 分析某餐前后的课表空档：
- * - 午饭关注 10:00–12:30 结束的课与 12:30–15:00 开始的课
- * - 晚饭关注 15:30–18:20 结束的课与 18:00–20:30 开始的课
- */
-export function analyzeMealWindow(sessions: ClassSession[], meal: MealType): MealScheduleContext {
-  if (sessions.length === 0) {
-    return { availableMinutes: null, lastClassLocation: null, classCount: 0, hint: '今天没课，可以慢慢挑' };
-  }
+const BJ_OFFSET_MS = 8 * 60 * 60 * 1000;
 
-  const toMinutes = (iso: string) => {
-    const d = new Date(new Date(iso).getTime() + 8 * 60 * 60 * 1000);
-    return d.getUTCHours() * 60 + d.getUTCMinutes();
-  };
+function toBeijingDateAndMins(iso: string): { date: string; mins: number } | null {
+  const ms = Date.parse(iso);
+  if (!Number.isFinite(ms)) return null;
+  const d = new Date(ms + BJ_OFFSET_MS);
+  const date = `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`;
+  return { date, mins: d.getUTCHours() * 60 + d.getUTCMinutes() };
+}
+
+function hhmmToMins(hhmm: string): number | null {
+  const m = /^(\d{1,2}):(\d{2})$/.exec(hhmm.trim());
+  if (!m) return null;
+  const h = Number(m[1]);
+  const min = Number(m[2]);
+  if (h < 0 || h > 23 || min < 0 || min > 59) return null;
+  return h * 60 + min;
+}
+
+function truncateLabel(text: string, max = 12): string {
+  const clean = text.trim();
+  return clean.length > max ? `${clean.slice(0, max - 1)}…` : clean;
+}
+
+/**
+ * 分析某餐前后的课表、待办与考试空档：
+ * - 午饭关注 10:00–12:30 结束的课/考、11:30–14:30 开始的课/考，以及 11:00–15:30 截止的待办
+ * - 晚饭关注 15:30–18:20 结束的课/考、17:00–20:00 开始的课/考，以及 16:30–22:00 截止的待办
+ * - 今日无课、无相关待办且无考试时标记 hasAnySchedule = false，供每日随机探索提高多样度
+ */
+export function analyzeMealWindow(
+  sessions: ClassSession[],
+  meal: MealType,
+  opts?: AnalyzeMealWindowOptions,
+): MealScheduleContext {
+  const todos = opts?.todos ?? [];
+  const exams = opts?.exams ?? [];
+  const inferredDate =
+    opts?.date ?? (sessions[0] ? toBeijingDateAndMins(sessions[0].start)?.date : undefined) ?? today();
 
   const mealStart = meal === 'lunch' ? 11 * 60 + 30 : 17 * 60;
   const mealEnd = meal === 'lunch' ? 14 * 60 + 30 : 20 * 60;
+  const defaultBase = meal === 'lunch' ? 11 * 60 + 30 : 17 * 60 + 15;
 
   let prevEnd: number | null = null;
   let lastClassLocation: string | null = null;
   let nextStart: number | null = null;
+  let nextIsExam = false;
+  let examName: string | null = null;
 
   for (const s of sessions) {
-    const start = toMinutes(s.start);
-    const end = toMinutes(s.end);
-    if (end <= mealStart + 60 && end >= mealStart - 120) {
-      if (prevEnd === null || end > prevEnd) {
-        prevEnd = end;
+    const startInfo = toBeijingDateAndMins(s.start);
+    const endInfo = toBeijingDateAndMins(s.end);
+    if (!startInfo || !endInfo) continue;
+    if (endInfo.mins <= mealStart + 60 && endInfo.mins >= mealStart - 120) {
+      if (prevEnd === null || endInfo.mins > prevEnd) {
+        prevEnd = endInfo.mins;
         lastClassLocation = s.location;
       }
     }
-    if (start >= mealStart && start <= mealEnd) {
-      if (nextStart === null || start < nextStart) {
-        nextStart = start;
+    if (startInfo.mins >= mealStart && startInfo.mins <= mealEnd) {
+      if (nextStart === null || startInfo.mins < nextStart) {
+        nextStart = startInfo.mins;
+        nextIsExam = false;
       }
+    }
+  }
+
+  for (const ex of exams) {
+    const startMins = hhmmToMins(ex.startTime);
+    const endMins = hhmmToMins(ex.endTime);
+    if (startMins === null || endMins === null) continue;
+    if (endMins <= mealStart + 60 && endMins >= mealStart - 120) {
+      if (prevEnd === null || endMins > prevEnd) {
+        prevEnd = endMins;
+        if (ex.location) lastClassLocation = ex.location;
+      }
+      if (!examName) examName = ex.courseName;
+    }
+    if (startMins >= mealStart && startMins <= mealEnd + 30) {
+      if (nextStart === null || startMins <= nextStart) {
+        nextStart = startMins;
+        nextIsExam = true;
+        examName = ex.courseName;
+      }
+    } else if (!examName) {
+      examName = ex.courseName;
     }
   }
 
@@ -467,22 +560,134 @@ export function analyzeMealWindow(sessions: ClassSession[], meal: MealType): Mea
   if (prevEnd !== null && nextStart !== null) {
     availableMinutes = Math.max(0, nextStart - prevEnd);
   } else if (nextStart !== null) {
-    const base = meal === 'lunch' ? 11 * 60 + 30 : 17 * 60 + 15;
-    availableMinutes = Math.max(0, nextStart - base);
+    availableMinutes = Math.max(0, nextStart - defaultBase);
   }
 
+  // 分析未完成待办：今日截止、已逾期、晚饭前看明早高优截止、以及无截止日期的高优待办
+  const todoWindowStart = meal === 'lunch' ? 11 * 60 : 16 * 60 + 30;
+  const todoWindowEnd = meal === 'lunch' ? 15 * 60 + 30 : 22 * 60;
+  const tomorrowDate = addDays(inferredDate, 1);
+
+  let todoCount = 0;
+  let urgentTodoCount = 0;
+  let tightByTodo = false;
+  let bestTodo: { title: string; urgencyRank: number; dueMins: number; priority: number } | null = null;
+
+  const considerTodo = (title: string, urgencyRank: number, dueMins: number, priority: number) => {
+    const clean = title.trim();
+    if (!clean) return;
+    if (
+      !bestTodo ||
+      urgencyRank < bestTodo.urgencyRank ||
+      (urgencyRank === bestTodo.urgencyRank &&
+        (dueMins < bestTodo.dueMins || (dueMins === bestTodo.dueMins && priority < bestTodo.priority)))
+    ) {
+      bestTodo = { title: clean, urgencyRank, dueMins, priority };
+    }
+  };
+
+  for (const t of todos) {
+    const priority = Number.isFinite(t.priority) ? t.priority : 3;
+    if (t.dueAt) {
+      const due = toBeijingDateAndMins(t.dueAt);
+      if (!due) continue;
+      const isOverdue = due.date < inferredDate;
+      const isDueToday = due.date === inferredDate;
+      const isTomorrowMorning =
+        meal === 'dinner' && due.date === tomorrowDate && due.mins <= 10 * 60 && priority <= 2;
+
+      if (!isOverdue && !isDueToday && !isTomorrowMorning) continue;
+      todoCount++;
+
+      if (isDueToday && due.mins >= todoWindowStart && due.mins <= todoWindowEnd) {
+        urgentTodoCount++;
+        tightByTodo = true;
+        considerTodo(t.title, 0, due.mins, priority);
+        const base = prevEnd ?? defaultBase;
+        if (due.mins >= base) {
+          const gap = Math.max(0, due.mins - base);
+          if (gap < 45 && (availableMinutes === null || gap < availableMinutes)) {
+            availableMinutes = gap;
+          }
+        }
+      } else if (isOverdue) {
+        urgentTodoCount++;
+        if (priority <= 2) tightByTodo = true;
+        considerTodo(t.title, priority <= 2 ? 1 : 2, due.mins, priority);
+      } else if (isDueToday && priority === 1) {
+        urgentTodoCount++;
+        tightByTodo = true;
+        considerTodo(t.title, 1, due.mins, priority);
+      } else if (isDueToday) {
+        considerTodo(t.title, 3, due.mins, priority);
+      } else {
+        considerTodo(t.title, 4, due.mins + 24 * 60, priority);
+      }
+    } else if (priority <= 2) {
+      todoCount++;
+      if (priority === 1) urgentTodoCount++;
+      considerTodo(t.title, priority === 1 ? 2 : 4, 24 * 60, priority);
+    }
+  }
+
+  if (todoCount >= 4 || urgentTodoCount >= 2) {
+    tightByTodo = true;
+  }
+
+  const nextTodoTitle = bestTodo ? (bestTodo as { title: string }).title : null;
+  const examCount = exams.length;
+  const hasAnySchedule = sessions.length > 0 || todoCount > 0 || examCount > 0;
+
   let hint: string | null = null;
-  if (availableMinutes !== null && availableMinutes < 45) {
+  if (nextIsExam && examName) {
+    if (availableMinutes !== null && availableMinutes < 60) {
+      hint = `待会要考「${truncateLabel(examName)}」，空档约 ${availableMinutes} 分钟，优先近且稳妥的`;
+    } else {
+      hint = `今天有「${truncateLabel(examName)}」考试，挑顿省心好消化的`;
+    }
+  } else if (availableMinutes !== null && availableMinutes < 45 && tightByTodo && nextTodoTitle) {
+    hint = `空档仅约 ${availableMinutes} 分钟且待办「${truncateLabel(nextTodoTitle)}」临近，优先近且快的`;
+  } else if (availableMinutes !== null && availableMinutes < 45) {
     hint = `课间只有约 ${availableMinutes} 分钟，优先近且快的`;
+  } else if (tightByTodo) {
+    hint = nextTodoTitle
+      ? `待办「${truncateLabel(nextTodoTitle)}」较紧，优先近且出餐快的`
+      : `今天有 ${todoCount} 项待办要推进，优先省时省心的`;
+  } else if (sessions.length > 0 && todoCount > 0) {
+    hint = lastClassLocation
+      ? `${meal === 'lunch' ? '上午' : '下午'}在 ${lastClassLocation} 下课，另有 ${todoCount} 项待办`
+      : `今天 ${sessions.length} 节课 + ${todoCount} 项待办，兼顾省时与口味`;
   } else if (lastClassLocation) {
     hint = `${meal === 'lunch' ? '上午' : '下午'}在 ${lastClassLocation} 下课`;
   } else if (sessions.length >= 4) {
     hint = `今天满课（${sessions.length} 节），吃顿补能量的`;
-  } else {
+  } else if (examCount > 0 && examName) {
+    hint = `今天考完「${truncateLabel(examName)}」，吃顿好的犒劳一下`;
+  } else if (todoCount > 0) {
+    hint =
+      nextTodoTitle && todoCount === 1
+        ? `今天没课，记着处理「${truncateLabel(nextTodoTitle)}」`
+        : `今天没课但有 ${todoCount} 项待办，挑顿省心好吃的`;
+  } else if (sessions.length > 0) {
     hint = `今天 ${sessions.length} 节课，时间充裕`;
+  } else {
+    hint = '今天没课也没待办，已按今日随机灵感为你挑口味';
   }
 
-  return { availableMinutes, lastClassLocation, classCount: sessions.length, hint };
+  return {
+    availableMinutes,
+    lastClassLocation,
+    classCount: sessions.length,
+    todoCount,
+    urgentTodoCount,
+    tightByTodo,
+    nextTodoTitle,
+    examCount,
+    examName,
+    examUpcoming: nextIsExam,
+    hasAnySchedule,
+    hint,
+  };
 }
 
 export interface FeedbackSignal {
@@ -491,6 +696,13 @@ export interface FeedbackSignal {
   /** 距离今天的天数（0 = 今天，1 = 昨天…） */
   daysAgo: number;
   meal: MealType;
+}
+
+export interface DailyRandomOptions {
+  /** 用户标识，确保不同用户拥有各自独立的每日随机序列 */
+  seedKey: string;
+  /** 北京日期 'YYYY-MM-DD' */
+  date: string;
 }
 
 export interface RecommendMealsInput {
@@ -507,6 +719,14 @@ export interface RecommendMealsInput {
   excludeIds?: string[];
   /** 返回条数，默认 3 */
   limit?: number;
+  /**
+   * 每日确定性随机配置。
+   * 传入时启用按课表/待办松紧度自适应的 Gumbel-Top-k 随机抽样与连续日错开机制：
+   * - 同一天同一餐保持稳定（首页/吃什么页/饭点推送一致）
+   * - 每天、每餐随机换新；即使连续两天均无课无待办，也能主动错开前一日首推
+   * 省略时按纯规则分确定性排序。
+   */
+  dailyRandom?: DailyRandomOptions;
 }
 
 const WARM_WEATHER_TAGS = new Set(['汤', '面', '热食', '饱腹', '辣']);
@@ -572,14 +792,77 @@ function weatherScoreOf(m: Merchant, tags: Set<string>, weather: WeatherNow | nu
   return { score: 0.6, reason: null };
 }
 
+const ZONE_MATCHERS: { classRe: RegExp; merchantRe: RegExp }[] = [
+  { classRe: /体育馆|田径|篮球|操场|南亭/, merchantRe: /南亭|二饭|西区/ },
+  { classRe: /西区|西苑|三饭|四饭/, merchantRe: /三饭|四饭|西区|贝岗/ },
+  { classRe: /东区|东苑|一饭|二饭/, merchantRe: /一饭|二饭|东区/ },
+  { classRe: /教[1-6一二三四五六]|教学|大教室|工学|实验|图书馆|行政/, merchantRe: /一饭|二饭|东区|三饭|南亭/ },
+];
+
+function isNearLastClass(lastClassLocation: string, merchantLocation: string): boolean {
+  for (const rule of ZONE_MATCHERS) {
+    if (rule.classRe.test(lastClassLocation)) {
+      return rule.merchantRe.test(merchantLocation);
+    }
+  }
+  return false;
+}
+
+function hasScheduleOf(schedule: MealScheduleContext): boolean {
+  if (schedule.hasAnySchedule !== undefined) return schedule.hasAnySchedule;
+  return schedule.classCount > 0 || (schedule.todoCount ?? 0) > 0 || (schedule.examCount ?? 0) > 0;
+}
+
+function isTightSchedule(schedule: MealScheduleContext, pace?: DiningPaceMode): boolean {
+  if (pace === 'rush') return true;
+  if (pace === 'relaxed') return false;
+  return (
+    (schedule.availableMinutes !== null && schedule.availableMinutes < 45) ||
+    Boolean(schedule.tightByTodo) ||
+    Boolean(schedule.examUpcoming && schedule.availableMinutes !== null && schedule.availableMinutes < 60)
+  );
+}
+
+/** FNV-1a 32-bit + Murmur3 fmix32 雪崩混合：将任意种子稳定映射到 (0, 1)，消除相邻日期字符串的尾部相关性 */
+function hashToUnit(seed: string): number {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < seed.length; i++) {
+    h ^= seed.charCodeAt(i);
+    h = Math.imul(h, 0x01000193);
+  }
+  h ^= h >>> 16;
+  h = Math.imul(h, 0x85ebca6b);
+  h ^= h >>> 13;
+  h = Math.imul(h, 0xc2b2ae35);
+  h ^= h >>> 16;
+  return ((h >>> 0) + 0.5) / 0x100000000;
+}
+
+/** 截断 Gumbel 噪声（u ∈ [0.02, 0.98]，输出 ∈ [-1.36, +3.90]），避免极端长尾破坏硬约束 */
+function gumbelNoise(seed: string, merchantId: string): number {
+  const u = 0.02 + hashToUnit(`${seed}|${merchantId}`) * 0.96;
+  return -Math.log(-Math.log(u));
+}
+
 function distanceScoreOf(
   m: Merchant,
   tags: Set<string>,
   schedule: MealScheduleContext,
   pace?: DiningPaceMode,
 ): { score: number; reason: string | null } {
-  const tight = pace === 'rush' || (pace !== 'relaxed' && schedule.availableMinutes !== null && schedule.availableMinutes < 45);
+  const tightByClass = pace !== 'relaxed' && schedule.availableMinutes !== null && schedule.availableMinutes < 45;
+  const tightByTodo = pace !== 'relaxed' && Boolean(schedule.tightByTodo);
+  const tightByExam =
+    pace !== 'relaxed' &&
+    Boolean(schedule.examUpcoming) &&
+    schedule.availableMinutes !== null &&
+    schedule.availableMinutes < 60;
+  const tight = isTightSchedule(schedule, pace);
+  const hasSchedule = hasScheduleOf(schedule);
   const walk = m.walkMinutes;
+  const nearLastClass = Boolean(
+    schedule.lastClassLocation && isNearLastClass(schedule.lastClassLocation, m.locationText),
+  );
 
   if (tight) {
     let score = 0.5;
@@ -588,17 +871,38 @@ function distanceScoreOf(
       else if (walk <= 8) score = 0.8;
       else if (walk <= 12) score = 0.45;
       else score = 0.15;
-    } else if (m.category === 'canteen' || m.category === 'fastfood') {
+    } else if (m.category === 'canteen' || m.category === 'fastfood' || m.category === 'noodle') {
       score = 0.82;
     }
     if (m.category === 'hotpot') score = clamp01(score - 0.3);
     if (tags.has('快手')) score = clamp01(score + 0.12);
-    const reason =
-      score >= 0.78
-        ? walk != null
-          ? `${pace === 'rush' ? '赶时间' : '课间紧'}，步行约 ${walk} 分钟不耽误事`
-          : '出餐快离得近，赶时间来得及'
-        : null;
+    if (nearLastClass && (walk == null || walk <= 8)) score = clamp01(score + 0.05);
+    if (schedule.examUpcoming) {
+      if (tags.has('辣') || m.category === 'hotpot') score = clamp01(score - 0.14);
+      if (tags.has('清淡') || tags.has('热食') || tags.has('饭')) score = clamp01(score + 0.06);
+    }
+
+    let reason: string | null = null;
+    if (score >= 0.78) {
+      if (pace === 'rush') {
+        reason = walk != null ? `赶时间，步行约 ${walk} 分钟不耽误事` : '出餐快离得近，赶时间来得及';
+      } else if (tightByExam && schedule.examName) {
+        reason =
+          walk != null
+            ? `考前时间紧，步行约 ${walk} 分钟吃得稳妥`
+            : `考前优先省心快手，不耽误「${truncateLabel(schedule.examName, 8)}」`;
+      } else if (tightByClass) {
+        reason = walk != null ? `课间紧，步行约 ${walk} 分钟不耽误事` : '出餐快离得近，课间来得及';
+      } else if (tightByTodo) {
+        if (walk != null) {
+          reason = schedule.nextTodoTitle
+            ? `待办「${truncateLabel(schedule.nextTodoTitle, 9)}」要赶，步行约 ${walk} 分钟`
+            : `今天待办较紧，步行约 ${walk} 分钟不耽误进度`;
+        } else {
+          reason = '今天待办较紧，出餐快不耽误进度';
+        }
+      }
+    }
     return { score, reason };
   }
 
@@ -608,13 +912,52 @@ function distanceScoreOf(
     return { score: clamp01(score), reason: null };
   }
 
-  let score = 0.65;
-  if (walk != null) {
+  const todoCount = schedule.todoCount ?? 0;
+  const heavyWorkload = schedule.classCount >= 4 || todoCount >= 3 || (schedule.examCount ?? 0) > 0;
+
+  let score = 0.68;
+  if (!hasSchedule) {
+    // 无课无待办的空闲日略微拉平距离差，让校外餐厅或稍远的店也能自然轮换
+    if (walk != null) {
+      if (walk <= 6) score = 0.76;
+      else if (walk <= 12) score = 0.72;
+      else score = 0.64;
+    }
+  } else if (walk != null) {
     if (walk <= 6) score = 0.85;
     else if (walk <= 12) score = 0.72;
     else score = 0.55;
+  } else {
+    score = 0.65;
   }
-  return { score, reason: null };
+
+  if (heavyWorkload) {
+    if (tags.has('饱腹') || tags.has('热食') || tags.has('饭') || tags.has('汤')) score += 0.08;
+    if (walk != null && walk > 14) score -= 0.1;
+  }
+  if (schedule.examUpcoming) {
+    if (tags.has('辣') || m.category === 'hotpot') score -= 0.14;
+    if (tags.has('清淡') || tags.has('热食')) score += 0.08;
+  }
+  if (nearLastClass && (walk == null || walk <= 7)) {
+    score += 0.06;
+  }
+
+  score = clamp01(score);
+  let reason: string | null = null;
+  if (schedule.examUpcoming && score >= 0.78 && !tags.has('辣')) {
+    reason = '今天有考试，吃得清爽稳妥更有状态';
+  } else if (nearLastClass && schedule.lastClassLocation && walk != null && walk <= 6) {
+    reason = `${schedule.lastClassLocation} 下课顺路，步行约 ${walk} 分钟`;
+  } else if (heavyWorkload && score >= 0.85) {
+    if (todoCount >= 2 && schedule.classCount === 0) {
+      reason = `今天有 ${todoCount} 项待办，吃顿省心热食好推进`;
+    } else if (schedule.classCount >= 4) {
+      reason = '今天课多消耗大，吃顿饱腹热食补补能量';
+    }
+  }
+
+  return { score, reason };
 }
 
 function partyAdjustmentOf(
@@ -704,6 +1047,7 @@ function buildReason(
     mood: { score: number; reason: string | null };
     pref: { score: number; reason: string | null; matchedTags: string[] };
     party?: { bonus: number; reason: string | null };
+    freeDaySeed?: string;
   },
 ): string {
   const ranked: { weight: number; text: string }[] = [];
@@ -722,19 +1066,159 @@ function buildReason(
     }
     return base;
   }
+  if (parts.freeDaySeed) {
+    const pick = Math.floor(hashToUnit(`${parts.freeDaySeed}|reason|${m.id}`) * 3);
+    if (topDish) {
+      if (pick === 0) return `今天时间充裕，随机换换口味试试「${topDish}」`;
+      if (pick === 1) return `今日随机灵感选中 ${m.locationText}，尝尝「${topDish}」`;
+      return `难得清闲，去 ${m.locationText} 吃口「${topDish}」换换花样`;
+    }
+    if (pick === 0) return `今天没安排，随机挑了 ${m.locationText} 换换口味`;
+    if (pick === 1) return `今日随机推荐 · ${m.locationText}，人均 ¥${m.priceAvg}`;
+  }
   if (topDish) return `${m.locationText}的人气之选，推荐尝尝「${topDish}」`;
   if (m.walkMinutes != null) return `${m.locationText}，步行约 ${m.walkMinutes} 分钟，人均 ¥${m.priceAvg}`;
   return `${m.locationText} · ${MERCHANT_CATEGORY_LABELS[m.category]}，人均 ¥${m.priceAvg}`;
 }
 
+function pickDiversified(ranked: MealRecommendation[], limit: number, tight: boolean): MealRecommendation[] {
+  const pool = ranked.slice(0, Math.max(10, limit));
+  const minTightScore = tight && pool[0] ? pool[0].score - 0.25 : -Infinity;
+  const picked: MealRecommendation[] = [];
+  const usedCats = new Set<MerchantCategory>();
+  const usedIds = new Set<string>();
+
+  for (const item of pool) {
+    if (picked.length >= limit) break;
+    if (usedCats.has(item.merchant.category)) continue;
+    if (item.score < minTightScore) continue;
+    picked.push(item);
+    usedCats.add(item.merchant.category);
+    usedIds.add(item.merchant.id);
+  }
+  for (const item of pool) {
+    if (picked.length >= limit) break;
+    if (usedIds.has(item.merchant.id)) continue;
+    picked.push(item);
+    usedIds.add(item.merchant.id);
+  }
+  return picked;
+}
+
+interface DailySamplingParams {
+  tau: number;
+  prevTop1Pen: number;
+  prevRestPen: number;
+  olderTop1Pen: number;
+  otherMealPen: number;
+  tight: boolean;
+}
+
+function rankWithSeed(
+  items: MealRecommendation[],
+  seed: string,
+  tau: number,
+  cooldowns: Map<string, number>,
+): MealRecommendation[] {
+  return items
+    .map((item) => ({
+      item,
+      key: item.score + tau * gumbelNoise(seed, item.merchant.id) - (cooldowns.get(item.merchant.id) ?? 0),
+    }))
+    .sort((a, b) => b.key - a.key || a.item.merchant.id.localeCompare(b.item.merchant.id))
+    .map((entry) => entry.item);
+}
+
+const DAILY_LOOKBACK_DAYS = 7;
+
+function addCooldown(map: Map<string, number>, id: string, delta: number) {
+  if (delta <= 0) return;
+  map.set(id, (map.get(id) ?? 0) + delta);
+}
+
+function buildDailyRanking(
+  scored: MealRecommendation[],
+  seedKey: string,
+  date: string,
+  meal: MealType,
+  params: DailySamplingParams,
+  avoidSameDayLunch: boolean,
+): MealRecommendation[] {
+  if (scored.length <= 1) return [...scored];
+
+  // 仅 2 家可选且非赶时间场景：按日历天数与餐次精确交替，保证连续两天及同日午晚饭绝不重复
+  if (scored.length === 2 && !params.tight) {
+    const base = [...scored].sort((a, b) => b.score - a.score || a.merchant.id.localeCompare(b.merchant.id));
+    const epochDay = daysBetween('2026-01-01', date);
+    const offset = Math.floor(hashToUnit(`${seedKey}|pair-anchor`) * 2);
+    const mealOffset = meal === 'dinner' ? 1 : 0;
+    const firstIdx = (((epochDay + offset + mealOffset) % 2) + 2) % 2;
+    return firstIdx === 0 ? [base[0]!, base[1]!] : [base[1]!, base[0]!];
+  }
+
+  // 回放近 7 天同餐次推荐序列，使昨日/前日首推在无显式反馈时也能自然冷却错开
+  const history: MealRecommendation[][] = [];
+  for (let delta = -DAILY_LOOKBACK_DAYS; delta <= -1; delta++) {
+    const stepDate = addDays(date, delta);
+    const stepCooldown = new Map<string, number>();
+    const prev = history[history.length - 1];
+    const older = history[history.length - 2];
+    if (prev?.[0]) addCooldown(stepCooldown, prev[0].merchant.id, params.prevTop1Pen);
+    if (prev && scored.length >= 5) {
+      for (const item of prev.slice(1)) addCooldown(stepCooldown, item.merchant.id, params.prevRestPen);
+    }
+    if (older?.[0] && scored.length >= 3) {
+      addCooldown(stepCooldown, older[0].merchant.id, params.olderTop1Pen);
+    }
+    const stepRanked = rankWithSeed(scored, `${seedKey}|${stepDate}|${meal}`, params.tau, stepCooldown);
+    history.push(pickDiversified(stepRanked, Math.min(3, scored.length), params.tight));
+  }
+
+  const todayCooldown = new Map<string, number>();
+  const yesterday = history[history.length - 1];
+  const dayBefore = history[history.length - 2];
+  if (yesterday?.[0]) addCooldown(todayCooldown, yesterday[0].merchant.id, params.prevTop1Pen);
+  if (yesterday && scored.length >= 5) {
+    for (const item of yesterday.slice(1)) addCooldown(todayCooldown, item.merchant.id, params.prevRestPen);
+  }
+  if (dayBefore?.[0] && scored.length >= 3) {
+    addCooldown(todayCooldown, dayBefore[0].merchant.id, params.olderTop1Pen);
+  }
+
+  if (avoidSameDayLunch && meal === 'dinner') {
+    const lunchRanked = buildDailyRanking(scored, seedKey, date, 'lunch', params, false);
+    const lunchTop = pickDiversified(lunchRanked, 1, params.tight)[0];
+    if (lunchTop) addCooldown(todayCooldown, lunchTop.merchant.id, params.otherMealPen);
+  }
+
+  return rankWithSeed(scored, `${seedKey}|${date}|${meal}`, params.tau, todayCooldown);
+}
+
 /**
- * 规则打分与品类打散（docs/03-backend.md 4.3）：
- * 过滤（状态、忌口、营业餐次、预算、已排除）→ 权重打分 → 取前 10 → 按品类打散取最多 limit 个（不凑数）
+ * 规则打分、每日自适应随机抽样与品类打散（docs/03-backend.md 4.3）：
+ * 过滤（状态、忌口、营业餐次、预算）→ 课表/待办/天气/心情/偏好打分
+ * → 传入 dailyRandom 时按日程松紧度进行 Gumbel-Top-k 每日随机排序并错开前日首推
+ * → 过滤「换一批」excludeIds → 按品类打散取最多 limit 个（不凑数）
  */
 export function scoreAndRecommendMeals(input: RecommendMealsInput): MealRecommendation[] {
-  const { merchants, meal, weather, schedule, mood, preference, feedbacks, context, excludeIds = [], limit = 3 } = input;
+  const {
+    merchants,
+    meal,
+    weather,
+    schedule,
+    mood,
+    preference,
+    feedbacks,
+    context,
+    excludeIds = [],
+    limit = 3,
+    dailyRandom,
+  } = input;
   const excludeSet = new Set(excludeIds);
   const dislikeTags = new Set(preference?.dislikes ?? []);
+  const tight = isTightSchedule(schedule, context?.pace);
+  const hasSchedule = hasScheduleOf(schedule);
+  const freeDaySeed = dailyRandom && !hasSchedule && !tight ? `${dailyRandom.seedKey}|${dailyRandom.date}|${meal}` : undefined;
 
   // 统计反馈信号：
   // - 历史上点过 disliked（14 天内）直接跳过
@@ -759,9 +1243,10 @@ export function scoreAndRecommendMeals(input: RecommendMealsInput): MealRecommen
     }
   }
 
-  const eligible = merchants.filter((m) => {
+  // 先基于全量合规商家计算当日排序（不含 excludeIds），保证点「换一批」时序列稳定不跳动
+  const baseEligible = merchants.filter((m) => {
     if (m.status !== 'approved') return false;
-    if (excludeSet.has(m.id) || dislikedMerchants.has(m.id) || skippedToday.has(m.id)) return false;
+    if (dislikedMerchants.has(m.id) || skippedToday.has(m.id)) return false;
 
     const tags = merchantTagsSet(m);
     for (const d of dislikeTags) {
@@ -783,7 +1268,13 @@ export function scoreAndRecommendMeals(input: RecommendMealsInput): MealRecommen
     return true;
   });
 
-  const scored: MealRecommendation[] = eligible.map((m) => {
+  const wWeather = tight ? 0.22 : 0.25;
+  const wDistance = tight ? 0.28 : 0.2;
+  const wMood = tight ? 0.18 : 0.2;
+  const wPref = 0.2;
+  const wCommunity = tight ? 0.12 : 0.15;
+
+  const scored: MealRecommendation[] = baseEligible.map((m) => {
     const tags = merchantTagsSet(m);
     const w = weatherScoreOf(m, tags, weather);
     const d = distanceScoreOf(m, tags, schedule, context?.pace);
@@ -799,7 +1290,13 @@ export function scoreAndRecommendMeals(input: RecommendMealsInput): MealRecommen
     const total = Math.max(
       0,
       Math.round(
-        (0.25 * w.score + 0.2 * d.score + 0.2 * mo.score + 0.2 * p.score + 0.15 * community + party.bonus - repeatPenalty) *
+        (wWeather * w.score +
+          wDistance * d.score +
+          wMood * mo.score +
+          wPref * p.score +
+          wCommunity * community +
+          party.bonus -
+          repeatPenalty) *
           1000,
       ) / 1000,
     );
@@ -816,32 +1313,28 @@ export function scoreAndRecommendMeals(input: RecommendMealsInput): MealRecommen
         repeatPenalty,
         total,
       },
-      reason: buildReason(m, { weather: w, distance: d, mood: mo, pref: p, party }),
+      reason: buildReason(m, { weather: w, distance: d, mood: mo, pref: p, party, freeDaySeed }),
       matchedTags: p.matchedTags,
     };
   });
 
-  scored.sort((a, b) => b.score - a.score || a.merchant.name.localeCompare(b.merchant.name, 'zh-CN'));
-  const pool = scored.slice(0, 10);
+  let ordered: MealRecommendation[];
+  if (dailyRandom) {
+    // 按日程松紧度自适应探索温度与连续日错开力度：
+    // - 课表/待办紧：低温度 + 温和冷却，严守近且快，只在合规快餐/食堂间每日轮换
+    // - 常规日程：中等温度，兼顾课表待办/天气/偏好与每日新鲜感
+    // - 无课无待办空闲日：高温度 + 强错开冷却，保证连续两天无安排也能随机换新不撞店
+    const params: DailySamplingParams = tight
+      ? { tau: 0.07, prevTop1Pen: 0.18, prevRestPen: 0.08, olderTop1Pen: 0.06, otherMealPen: 0.14, tight: true }
+      : hasSchedule
+        ? { tau: 0.14, prevTop1Pen: 0.55, prevRestPen: 0.22, olderTop1Pen: 0.16, otherMealPen: 0.4, tight: false }
+        : { tau: 0.25, prevTop1Pen: 1.8, prevRestPen: 0.7, olderTop1Pen: 0.45, otherMealPen: 1.6, tight: false };
 
-  // 按品类打散：第一轮优先不同品类，不足 limit 时再按分补齐
-  const picked: MealRecommendation[] = [];
-  const usedCats = new Set<MerchantCategory>();
-  const usedIds = new Set<string>();
-
-  for (const item of pool) {
-    if (picked.length >= limit) break;
-    if (usedCats.has(item.merchant.category)) continue;
-    picked.push(item);
-    usedCats.add(item.merchant.category);
-    usedIds.add(item.merchant.id);
-  }
-  for (const item of pool) {
-    if (picked.length >= limit) break;
-    if (usedIds.has(item.merchant.id)) continue;
-    picked.push(item);
-    usedIds.add(item.merchant.id);
+    ordered = buildDailyRanking(scored, dailyRandom.seedKey, dailyRandom.date, meal, params, true);
+  } else {
+    ordered = [...scored].sort((a, b) => b.score - a.score || a.merchant.name.localeCompare(b.merchant.name, 'zh-CN'));
   }
 
-  return picked;
+  const visible = excludeSet.size > 0 ? ordered.filter((r) => !excludeSet.has(r.merchant.id)) : ordered;
+  return pickDiversified(visible, limit, tight);
 }

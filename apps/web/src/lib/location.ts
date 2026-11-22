@@ -34,6 +34,7 @@ interface RawCoords {
   longitude: number;
   accuracy?: number | null;
   heading?: number | null;
+  course?: number | null;
 }
 
 interface RawPosition {
@@ -42,6 +43,34 @@ interface RawPosition {
 }
 
 let cachedFix: GeoFix | null = null;
+
+/** 将任意角度归一化到 [0, 360) */
+export function normalizeAngleDeg(deg: number): number {
+  const m = deg % 360;
+  return m < 0 ? m + 360 : m;
+}
+
+/** 计算从 from 到 to 的地理方位角（度：0=正北, 90=正东, 180=正南, 270=正西） */
+export function computeBearingDeg(
+  from: { lat: number; lng: number },
+  to: { lat: number; lng: number },
+): number {
+  const meanLatRad = (((from.lat + to.lat) / 2) * Math.PI) / 180;
+  const dx = (to.lng - from.lng) * Math.cos(meanLatRad);
+  const dy = to.lat - from.lat;
+  if (Math.abs(dx) < 1e-10 && Math.abs(dy) < 1e-10) return 0;
+  return normalizeAngleDeg((Math.atan2(dx, dy) * 180) / Math.PI);
+}
+
+/** 最短弧角度平滑（处理 359° ↔ 1° 跨零无突变） */
+export function smoothAngleDeg(prevDeg: number | null, nextDeg: number, alpha = 0.25): number {
+  const target = normalizeAngleDeg(nextDeg);
+  if (prevDeg === null || !Number.isFinite(prevDeg)) return target;
+  const cur = normalizeAngleDeg(prevDeg);
+  let delta = ((target - cur + 540) % 360) - 180;
+  if (delta < -180) delta += 360;
+  return normalizeAngleDeg(cur + delta * alpha);
+}
 
 /** 两点平面近似距离（米），适用于全球任意短距离定位跳变检测 */
 export function approxMetersBetween(a: { lat: number; lng: number }, b: { lat: number; lng: number }): number {
@@ -53,9 +82,10 @@ export function approxMetersBetween(a: { lat: number; lng: number }, b: { lat: n
 
 /**
  * 定位质量过滤与平滑器：
- * 1. 丢弃明显过期、无效坐标或已锁星时突然回退的粗略基站跳点；
- * 2. 从室内粗略定位切到室外高精度 GNSS 锁星时零延迟瞬时贴合；
- * 3. 原地静止时轻微阻尼 GNSS 漂移（< 3.5m），步行/骑行时保持跟手。
+ * 1. 兼容国产安卓机 GPS 卫星时钟与系统时钟的轻微偏差（容忍 ≤15s 时差），避免误丢正常定位点；
+ * 2. 丢弃已锁星时短时间内回退的粗略基站跳点，但如果超过 12s 没收到高精度点则自动放行避免定死；
+ * 3. 行进距离 ≥3.5m 且系统未给朝向时，自动通过位移推算行进方位角，让前进视角持续跟走；
+ * 4. 原地静止时轻微阻尼 GNSS 漂移（<3.5m），步行/骑行时保持跟手。
  */
 export function acceptAndSmoothFix(prev: GeoFix | null, next: GeoFix): GeoFix | null {
   if (
@@ -70,37 +100,51 @@ export function acceptAndSmoothFix(prev: GeoFix | null, next: GeoFix): GeoFix | 
   const candidate: GeoFix = {
     ...next,
     accuracy: normalizedAccuracy,
+    heading:
+      next.heading !== null && Number.isFinite(next.heading) && next.heading >= 0
+        ? normalizeAngleDeg(next.heading)
+        : null,
     quality: next.quality ?? (normalizedAccuracy <= 30 ? 'precise' : 'fast'),
   };
 
   if (!prev) return candidate;
 
   const dtMs = candidate.timestamp - prev.timestamp;
-  // 丢弃乱序的旧缓存回包
-  if (dtMs < -2_000) return null;
+  // 容忍国产安卓机 GNSS 与网络定位之间最多 15 秒的时钟微差；仅拒绝明显陈旧缓存
+  if (dtMs < -15_000) return null;
+  const safeTimestamp = Math.max(prev.timestamp, candidate.timestamp);
+  const elapsedMs = Math.max(0, safeTimestamp - prev.timestamp);
 
-  // 已获得室外高精度 GNSS 锁星时，拒绝短暂回退到 >100m 的粗略网络/基站定位
-  if (prev.accuracy <= 35 && candidate.accuracy > 100 && dtMs < 25_000) {
+  // 已获得室外高精度 GNSS 锁星时，拒绝短时间内回退到粗略基站定位；超过 12s/20s 自动放行防止定位卡死
+  if (prev.accuracy <= 35 && candidate.accuracy > 100 && elapsedMs < 20_000) {
     return null;
   }
-  if (prev.accuracy <= 20 && candidate.accuracy > 65 && dtMs < 12_000) {
+  if (prev.accuracy <= 20 && candidate.accuracy > 65 && elapsedMs < 10_000) {
     return null;
   }
 
   const dist = approxMetersBetween(prev, candidate);
-  const dtSec = Math.max(0.5, dtMs / 1000);
+  const dtSec = Math.max(0.5, elapsedMs / 1000);
 
-  // 过滤极端瞬移异常（例如 3 秒内突跳 >250m 且精度更差）
+  // 过滤极端瞬移异常（例如 3 秒内突跳 >250m 且精度明显恶化）
   if (dist > 250 && dtSec < 3 && candidate.accuracy > 40 && candidate.accuracy > prev.accuracy * 1.5) {
     return null;
   }
 
-  const heading =
-    candidate.heading !== null ? candidate.heading : dtMs < 8_000 ? prev.heading : null;
+  // 行进中自动推算真实前进方向（比磁力计更抗建筑/金属干扰）
+  const movementBearing = dist >= 3.5 && candidate.accuracy <= 45 ? computeBearingDeg(prev, candidate) : null;
+  let heading: number | null;
+  if (movementBearing !== null) {
+    heading = smoothAngleDeg(prev.heading, movementBearing, 0.45);
+  } else if (candidate.heading !== null) {
+    heading = smoothAngleDeg(prev.heading, candidate.heading, 0.35);
+  } else {
+    heading = elapsedMs < 12_000 ? prev.heading : null;
+  }
 
   // 从粗略定位升级到高精度锁星：立即瞬移校准，不拖尾
   if (candidate.accuracy <= 25 && prev.accuracy > 45) {
-    return { ...candidate, heading };
+    return { ...candidate, timestamp: safeTimestamp, heading };
   }
 
   // 静止微小 GNSS 抖动（< 3.5m）：轻度指数平滑消除蓝点乱颤
@@ -108,6 +152,7 @@ export function acceptAndSmoothFix(prev: GeoFix | null, next: GeoFix): GeoFix | 
     const alpha = 0.35;
     return {
       ...candidate,
+      timestamp: safeTimestamp,
       lat: prev.lat + (candidate.lat - prev.lat) * alpha,
       lng: prev.lng + (candidate.lng - prev.lng) * alpha,
       heading,
@@ -119,13 +164,14 @@ export function acceptAndSmoothFix(prev: GeoFix | null, next: GeoFix): GeoFix | 
     const alpha = 0.72;
     return {
       ...candidate,
+      timestamp: safeTimestamp,
       lat: prev.lat + (candidate.lat - prev.lat) * alpha,
       lng: prev.lng + (candidate.lng - prev.lng) * alpha,
       heading,
     };
   }
 
-  return { ...candidate, heading };
+  return { ...candidate, timestamp: safeTimestamp, heading };
 }
 
 /** 读取内存中近期有效定位缓存（默认 30 秒内有效），实现 0ms 秒开导航 */
@@ -148,17 +194,28 @@ function recordFix(fix: GeoFix): GeoFix {
   return cachedFix;
 }
 
-function toGeoFix(pos: RawPosition, quality: FixQuality): GeoFix {
+function extractHeading(coords: RawCoords): number | null {
+  if (typeof coords.heading === 'number' && Number.isFinite(coords.heading) && coords.heading >= 0) {
+    return normalizeAngleDeg(coords.heading);
+  }
+  if (typeof coords.course === 'number' && Number.isFinite(coords.course) && coords.course >= 0) {
+    return normalizeAngleDeg(coords.course);
+  }
+  return null;
+}
+
+function toGeoFix(pos: RawPosition, quality: FixQuality, preferLocalClock = false): GeoFix {
   const accuracy = Math.max(1, Math.round(pos.coords.accuracy ?? 25));
+  const now = Date.now();
+  // 实时监听回包若卫星时钟与本机时钟存在偏差，用本机单调时间保底，避免误判为旧包或看门狗误触发
+  const rawTs = typeof pos.timestamp === 'number' && Number.isFinite(pos.timestamp) && pos.timestamp > 0 ? pos.timestamp : now;
+  const timestamp = preferLocalClock && Math.abs(now - rawTs) > 5_000 ? now : rawTs;
   return {
     lat: pos.coords.latitude,
     lng: pos.coords.longitude,
     accuracy,
-    heading:
-      typeof pos.coords.heading === 'number' && !Number.isNaN(pos.coords.heading) && pos.coords.heading >= 0
-        ? pos.coords.heading
-        : null,
-    timestamp: pos.timestamp || Date.now(),
+    heading: extractHeading(pos.coords),
+    timestamp,
     quality: quality === 'precise' || accuracy <= 25 ? 'precise' : 'fast',
   };
 }
@@ -221,6 +278,7 @@ async function requestSinglePosition(opts: {
   enableHighAccuracy: boolean;
   timeout: number;
   maximumAge: number;
+  preferLocalClock?: boolean;
 }): Promise<GeoFix> {
   const quality: FixQuality = opts.enableHighAccuracy ? 'precise' : 'fast';
   if (isNative) {
@@ -231,7 +289,7 @@ async function requestSinglePosition(opts: {
       maximumAge: opts.maximumAge,
       enableLocationFallback: true,
     });
-    return toGeoFix(pos, quality);
+    return toGeoFix(pos, quality, opts.preferLocalClock);
   }
 
   if (typeof navigator === 'undefined' || !('geolocation' in navigator)) {
@@ -240,7 +298,7 @@ async function requestSinglePosition(opts: {
 
   return new Promise<GeoFix>((resolve, reject) => {
     navigator.geolocation.getCurrentPosition(
-      (pos) => resolve(toGeoFix(pos, quality)),
+      (pos) => resolve(toGeoFix(pos, quality, opts.preferLocalClock)),
       (err) => reject(normalizeError(err)),
       {
         enableHighAccuracy: opts.enableHighAccuracy,
@@ -320,7 +378,6 @@ export async function getCurrentLocation(options?: GetLocationOptions): Promise<
         fastResult = accepted;
         if (!settled) {
           options?.onFastFix?.(accepted);
-          // 若系统已缓存 15 秒内的高精度 GPS 锁星，直接秒返
           if (accepted.accuracy <= 25 && Date.now() - accepted.timestamp <= 15_000) {
             finishSuccess(accepted);
           }
@@ -353,8 +410,10 @@ export async function getCurrentLocation(options?: GetLocationOptions): Promise<
 }
 
 /**
- * 持续追踪实时位置（高频 1~2s 安卓 GNSS 更新 + 0.3s 快速首帧 + 抖动滤波）。
- * 返回停止追踪的清理函数。
+ * 持续追踪实时位置（自愈断流重连 + 5 秒保活看门狗 + 前后台切回自动续接）。
+ *
+ * 根因修复：@capacitor/geolocation 在安卓端单次超时会调用 PluginCall.reject() 导致监听流静默终止；
+ * 本实现通过「出错自动重建监听 + 定期心跳补采 + 息屏/切后台回来自动重启」确保全程跟走不断流。
  */
 export async function watchLocation(
   onFix: (fix: GeoFix) => void,
@@ -372,14 +431,130 @@ export async function watchLocation(
 
   let stopped = false;
   let lastEmitted: GeoFix | null = null;
+  let lastSignalAt = Date.now();
+  let lastWatchStartedAt = 0;
+  let consecutiveErrors = 0;
+  let probeInFlight = false;
+  let activeCleanup: (() => void) | null = null;
+  let restartTimer: ReturnType<typeof setTimeout> | null = null;
+  let removeAppListener: (() => void) | null = null;
 
   const emit = (raw: GeoFix) => {
     if (stopped) return;
+    lastSignalAt = Date.now();
+    consecutiveErrors = 0;
     const smoothed = acceptAndSmoothFix(lastEmitted, raw);
     if (!smoothed) return;
     lastEmitted = smoothed;
     recordFix(smoothed);
     onFix(smoothed);
+  };
+
+  const clearActiveWatch = () => {
+    const cleanup = activeCleanup;
+    activeCleanup = null;
+    cleanup?.();
+  };
+
+  const runProbe = (highAccuracy: boolean) => {
+    if (stopped || probeInFlight) return;
+    probeInFlight = true;
+    void requestSinglePosition({
+      enableHighAccuracy: highAccuracy,
+      maximumAge: highAccuracy ? 2_000 : 8_000,
+      timeout: highAccuracy ? 4_000 : 2_500,
+      preferLocalClock: true,
+    })
+      .then((fix) => {
+        if (!stopped) emit(fix);
+      })
+      .catch(() => {
+        // 心跳补采静默容错，下次周期自动重试
+      })
+      .finally(() => {
+        probeInFlight = false;
+      });
+  };
+
+  const scheduleRestart = (delayMs: number) => {
+    if (stopped || restartTimer) return;
+    restartTimer = setTimeout(() => {
+      restartTimer = null;
+      if (!stopped) void startUnderlyingWatch();
+    }, delayMs);
+  };
+
+  const handleWatchError = (err: unknown) => {
+    if (stopped) return;
+    const normalized = normalizeError(err);
+    if (normalized.code === 'denied') {
+      clearActiveWatch();
+      onError?.(normalized);
+      return;
+    }
+
+    // Capacitor Android 端一旦触发 timeout/unavailable 会终止当前 watch 回调：必须主动清理并重连！
+    consecutiveErrors += 1;
+    clearActiveWatch();
+    const backoff = Math.min(4_000, 1_000 * consecutiveErrors);
+    scheduleRestart(backoff);
+    // 同时发一次快速网络/缓存补采，过隧道或进宿舍楼下不掉线
+    runProbe(false);
+
+    // 仅在连续失败且超过 25 秒无任何有效信号时才轻提示用户
+    if (consecutiveErrors >= 3 && Date.now() - lastSignalAt > 25_000) {
+      onError?.(normalized);
+    }
+  };
+
+  const startUnderlyingWatch = async () => {
+    if (stopped) return;
+    clearActiveWatch();
+    lastWatchStartedAt = Date.now();
+
+    if (isNative) {
+      try {
+        const { Geolocation } = await import('@capacitor/geolocation');
+        if (stopped) return;
+        const id = await Geolocation.watchPosition(
+          {
+            enableHighAccuracy: true,
+            timeout: 30_000,
+            interval: 1_500,
+            minimumUpdateInterval: 800,
+            maximumAge: 2_000,
+            enableLocationFallback: true,
+          },
+          (pos, err) => {
+            if (err) {
+              handleWatchError(err);
+              return;
+            }
+            if (!pos) return;
+            emit(toGeoFix(pos, 'precise', true));
+          },
+        );
+        if (stopped) {
+          void Geolocation.clearWatch({ id });
+          return;
+        }
+        activeCleanup = () => {
+          void Geolocation.clearWatch({ id }).catch(() => {});
+        };
+      } catch (err) {
+        handleWatchError(err);
+      }
+      return;
+    }
+
+    const watchId = navigator.geolocation.watchPosition(
+      (pos) => emit(toGeoFix(pos, 'precise', true)),
+      (err) => handleWatchError(err),
+      { enableHighAccuracy: true, timeout: 25_000, maximumAge: 2_000 },
+    );
+    activeCleanup = () => {
+      navigator.geolocation.clearWatch(watchId);
+    };
   };
 
   // 立刻回放近期缓存位置（0ms 首帧），避免开启导航后黑屏/傻等
@@ -388,67 +563,124 @@ export async function watchLocation(
     emit(warm);
   }
 
-  // 若无 8 秒内的高精度点，并行触发一次 3s 快速首帧，确保冷启动 <0.4s 出蓝点
+  // 启动底层实时监听 + 冷启动 0.3s 快速首帧
+  await startUnderlyingWatch();
   if (!warm || warm.accuracy > 25 || Date.now() - warm.timestamp > 8_000) {
-    void requestSinglePosition({
-      enableHighAccuracy: false,
-      maximumAge: 60_000,
-      timeout: 3_000,
-    })
-      .then((fastFix) => {
-        if (!stopped && (!lastEmitted || lastEmitted.accuracy > fastFix.accuracy)) {
-          emit(fastFix);
-        }
-      })
-      .catch(() => {
-        // 静默忽略快速首帧失败，由主 GNSS watch 兜底
-      });
+    runProbe(false);
   }
 
-  const handleWatchError = (err: unknown) => {
+  // 保活看门狗：每 4 秒检查监听流是否静默卡死（安卓省电策略 / 过隧道后常见），自动补采与重建监听
+  const watchdog = setInterval(() => {
     if (stopped) return;
-    const normalized = normalizeError(err);
-    // 过隧道/走廊短暂丢星超时且近期有有效位置时，不刷屏打断导航
-    if (normalized.code === 'timeout' && lastEmitted && Date.now() - lastEmitted.timestamp < 30_000) {
-      return;
+    const silentMs = Date.now() - lastSignalAt;
+    if (silentMs >= 12_000 && Date.now() - lastWatchStartedAt >= 12_000) {
+      void startUnderlyingWatch();
+      runProbe(false);
+    } else if (silentMs >= 5_500) {
+      runProbe(true);
     }
-    onError?.(normalized);
+  }, 4_000);
+
+  // 切后台 / 锁屏后回到 App 时立即续接定位流
+  const handleResume = () => {
+    if (stopped) return;
+    if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
+    void startUnderlyingWatch();
+    runProbe(true);
   };
 
-  if (isNative) {
-    const { Geolocation } = await import('@capacitor/geolocation');
-    const id = await Geolocation.watchPosition(
-      {
-        enableHighAccuracy: true,
-        timeout: 10_000,
-        interval: 2_000,
-        minimumUpdateInterval: 1_000,
-        maximumAge: 3_000,
-        enableLocationFallback: true,
-      },
-      (pos, err) => {
-        if (err) {
-          handleWatchError(err);
-          return;
-        }
-        if (!pos) return;
-        emit(toGeoFix(pos, 'precise'));
-      },
-    );
-    return () => {
-      stopped = true;
-      void Geolocation.clearWatch({ id });
-    };
+  if (typeof document !== 'undefined') {
+    document.addEventListener('visibilitychange', handleResume);
   }
 
-  const watchId = navigator.geolocation.watchPosition(
-    (pos) => emit(toGeoFix(pos, 'precise')),
-    (err) => handleWatchError(err),
-    { enableHighAccuracy: true, timeout: 10_000, maximumAge: 3_000 },
-  );
+  if (isNative) {
+    void import('@capacitor/app')
+      .then(({ App }) =>
+        App.addListener('appStateChange', ({ isActive }) => {
+          if (isActive) handleResume();
+        }),
+      )
+      .then((handle) => {
+        if (stopped) {
+          void handle.remove();
+        } else {
+          removeAppListener = () => {
+            void handle.remove();
+          };
+        }
+      })
+      .catch(() => {});
+  }
 
   return () => {
     stopped = true;
-    navigator.geolocation.clearWatch(watchId);
+    clearInterval(watchdog);
+    if (restartTimer) {
+      clearTimeout(restartTimer);
+      restartTimer = null;
+    }
+    if (typeof document !== 'undefined') {
+      document.removeEventListener('visibilitychange', handleResume);
+    }
+    removeAppListener?.();
+    removeAppListener = null;
+    clearActiveWatch();
+  };
+}
+
+/**
+ * 监听手机电子罗盘朝向（0°=正北, 90°=正东, 180°=正南, 270°=正西），
+ * 用于导航刚启动或原地转身时即时旋转地图至前进方向。
+ */
+export function watchCompassHeading(onHeading: (deg: number) => void): () => void {
+  if (typeof window === 'undefined') return () => {};
+
+  let smoothed: number | null = null;
+  let lastReported = -999;
+  let lastReportAt = 0;
+  let hasAbsoluteEvent = false;
+
+  const getScreenAngle = (): number => {
+    if (typeof screen !== 'undefined' && screen.orientation && typeof screen.orientation.angle === 'number') {
+      return screen.orientation.angle;
+    }
+    return 0;
+  };
+
+  const handleOrientation = (ev: Event, isAbsoluteSource: boolean) => {
+    const e = ev as DeviceOrientationEvent & { webkitCompassHeading?: number };
+    if (isAbsoluteSource) hasAbsoluteEvent = true;
+    else if (hasAbsoluteEvent) return;
+
+    let rawHeading: number | null = null;
+    if (typeof e.webkitCompassHeading === 'number' && Number.isFinite(e.webkitCompassHeading)) {
+      rawHeading = normalizeAngleDeg(e.webkitCompassHeading);
+    } else if (typeof e.alpha === 'number' && Number.isFinite(e.alpha)) {
+      // 仅使用绝对方位角或明确声明 absolute=true 的事件，避免无北向基准的相对陀螺仪乱转
+      if (!isAbsoluteSource && e.absolute !== true) return;
+      rawHeading = normalizeAngleDeg(360 - e.alpha + getScreenAngle());
+    }
+
+    if (rawHeading === null) return;
+    smoothed = smoothAngleDeg(smoothed, rawHeading, 0.22);
+
+    const now = Date.now();
+    const diff = Math.abs(((smoothed - lastReported + 540) % 360) - 180);
+    if (now - lastReportAt >= 70 && (lastReported < 0 || diff >= 1.5)) {
+      lastReportAt = now;
+      lastReported = smoothed;
+      onHeading(smoothed);
+    }
+  };
+
+  const onAbs = (e: Event) => handleOrientation(e, true);
+  const onStd = (e: Event) => handleOrientation(e, false);
+
+  window.addEventListener('deviceorientationabsolute', onAbs, true);
+  window.addEventListener('deviceorientation', onStd, true);
+
+  return () => {
+    window.removeEventListener('deviceorientationabsolute', onAbs, true);
+    window.removeEventListener('deviceorientation', onStd, true);
   };
 }

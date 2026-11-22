@@ -2,6 +2,7 @@ import {
   DEFAULT_CAMPUS_ID,
   type DiningContext,
   type ExamData,
+  type FitnessData,
   type MealFeedback,
   type MealRecommendationResponse,
   type MealType,
@@ -26,6 +27,7 @@ export const keys = {
   weather: (campusId: string | null) => ['weather', campusId] as const,
   timetable: ['timetable'] as const,
   exams: ['exams'] as const,
+  fitness: ['fitness'] as const,
   todos: ['todos'] as const,
   notifications: ['notifications'] as const,
   preferences: ['preferences'] as const,
@@ -70,6 +72,15 @@ export function useExams() {
   return useQuery({
     queryKey: keys.exams,
     queryFn: () => api<ExamData>('/exams'),
+    enabled: useLoggedIn(),
+    staleTime: 5 * 60_000,
+  });
+}
+
+export function useFitnessRecords() {
+  return useQuery({
+    queryKey: keys.fitness,
+    queryFn: () => api<FitnessData>('/fitness'),
     enabled: useLoggedIn(),
     staleTime: 5 * 60_000,
   });

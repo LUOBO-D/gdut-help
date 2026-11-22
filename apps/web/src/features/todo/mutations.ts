@@ -77,6 +77,7 @@ export function useToggleTodo() {
         const updated = list.map((t) => (t.id === todo.id ? todo : t));
         return nextTodo && !updated.some((t) => t.id === nextTodo.id) ? [...updated, nextTodo] : updated;
       });
+      void qc.invalidateQueries({ queryKey: keys.recommendationsPrefix });
     },
   });
 }
@@ -111,6 +112,7 @@ export function useSaveTodo() {
         return;
       }
       void qc.invalidateQueries({ queryKey: keys.todos });
+      void qc.invalidateQueries({ queryKey: keys.recommendationsPrefix });
     },
   });
 }
@@ -119,6 +121,9 @@ export function useDeleteTodo() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (id: string) => api<null>(`/todos/${id}`, { method: 'DELETE' }),
-    onSuccess: (_d, id) => qc.setQueryData<Todo[]>(keys.todos, (list) => list?.filter((t) => t.id !== id)),
+    onSuccess: (_d, id) => {
+      qc.setQueryData<Todo[]>(keys.todos, (list) => list?.filter((t) => t.id !== id));
+      void qc.invalidateQueries({ queryKey: keys.recommendationsPrefix });
+    },
   });
 }

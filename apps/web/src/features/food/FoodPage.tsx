@@ -169,7 +169,7 @@ export function FoodPage() {
     <>
       <PageHeader
         title="吃什么"
-        subtitle="按天气、课表空档和今日心情挑一顿"
+        subtitle="结合课表待办、天气和心情，每天随机挑一顿"
         action={
           <div className="flex gap-2">
             <Button variant="ghost" className="h-10 px-3 text-sm" onClick={() => setPrefOpen(true)}>

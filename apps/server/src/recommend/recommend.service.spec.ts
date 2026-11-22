@@ -35,6 +35,8 @@ function makeHarness() {
     moodLog: { findUnique: vi.fn(), upsert: vi.fn() },
     mealFeedback: { findMany: vi.fn(), create: vi.fn() },
     merchant: { findUnique: vi.fn() },
+    todo: { findMany: vi.fn().mockResolvedValue([]) },
+    exam: { findMany: vi.fn().mockResolvedValue([]) },
   };
   const merchants = { listApprovedForCampus: vi.fn() };
   const weather = { get: vi.fn() };
@@ -121,5 +123,77 @@ describe('RecommendService', () => {
         action: 'accepted',
       }),
     ).rejects.toMatchObject({ errorCode: 'NOT_FOUND' });
+  });
+
+  it('推荐时会读取未完成待办，待办临近截止时提示并优先近且快的店', async () => {
+    const { service, prisma, merchants, weather, timetable } = makeHarness();
+    prisma.user.findUnique.mockResolvedValue({ campusId: 'hemc' });
+    prisma.userPreference.findUnique.mockResolvedValue(null);
+    prisma.moodLog.findUnique.mockResolvedValue(null);
+    prisma.mealFeedback.findMany.mockResolvedValue([]);
+    prisma.todo.findMany.mockResolvedValue([
+      {
+        title: '提交高数作业',
+        priority: 1,
+        dueAt: new Date('2026-11-22T04:40:00.000Z'), // 北京 12:40
+      },
+    ]);
+    prisma.exam.findMany.mockResolvedValue([]);
+    timetable.data.mockResolvedValue({ semester: null, courses: [] });
+    weather.get.mockResolvedValue({
+      now: { temp: 22, feelsLike: 22, text: '晴', scene: 'sunny', humidity: 55 },
+    });
+    merchants.listApprovedForCampus.mockResolvedValue([
+      makeMerchant({ id: 'far', name: '校外慢吃火锅', category: 'hotpot', walkMinutes: 20, tags: ['辣', '聚餐'] }),
+      makeMerchant({ id: 'near', name: '一饭快餐窗口', category: 'canteen', walkMinutes: 3, tags: ['饭', '快手'] }),
+    ]);
+
+    const res = await service.recommendMeals('u1', {
+      meal: 'lunch',
+      now: new Date('2026-11-22T03:30:00.000Z'), // 北京 11:30
+    });
+
+    expect(res.scheduleHint).toContain('提交高数作业');
+    expect(res.items[0]!.merchant.id).toBe('near');
+  });
+
+  it('连续两天均无课程和待办时，两天的推荐结果会每日随机错开', async () => {
+    const { service, prisma, merchants, weather, timetable } = makeHarness();
+    prisma.user.findUnique.mockResolvedValue({ campusId: 'hemc' });
+    prisma.userPreference.findUnique.mockResolvedValue(null);
+    prisma.moodLog.findUnique.mockResolvedValue(null);
+    prisma.mealFeedback.findMany.mockResolvedValue([]);
+    prisma.todo.findMany.mockResolvedValue([]);
+    prisma.exam.findMany.mockResolvedValue([]);
+    timetable.data.mockResolvedValue({ semester: null, courses: [] });
+    weather.get.mockResolvedValue({
+      now: { temp: 23, feelsLike: 23, text: '多云', scene: 'cloudy', humidity: 60 },
+    });
+    merchants.listApprovedForCampus.mockResolvedValue([
+      makeMerchant({ id: 'm1', name: '一饭烧腊饭', category: 'canteen', walkMinutes: 4, tags: ['饭', '热食'] }),
+      makeMerchant({ id: 'm2', name: '潮汕牛肉汤粉', category: 'noodle', walkMinutes: 5, tags: ['面', '汤'] }),
+      makeMerchant({ id: 'm3', name: '芝士烤盘饭', category: 'fastfood', walkMinutes: 5, tags: ['饭', '饱腹'] }),
+      makeMerchant({ id: 'm4', name: '南亭粤菜小炒', category: 'restaurant', walkMinutes: 7, tags: ['清淡', '饭'] }),
+      makeMerchant({ id: 'm5', name: '广式糖水铺', category: 'dessert', walkMinutes: 5, tags: ['甜品', '凉食'] }),
+    ]);
+
+    const day1First = await service.recommendMeals('u1', {
+      meal: 'lunch',
+      now: new Date('2026-11-22T03:30:00.000Z'),
+    });
+    const day1Again = await service.recommendMeals('u1', {
+      meal: 'lunch',
+      now: new Date('2026-11-22T04:00:00.000Z'),
+    });
+    const day2 = await service.recommendMeals('u1', {
+      meal: 'lunch',
+      now: new Date('2026-11-23T03:30:00.000Z'),
+    });
+
+    expect(day1First.scheduleHint).toContain('随机');
+    // 同一天两次请求稳定一致
+    expect(day1Again.items.map((i) => i.merchant.id)).toEqual(day1First.items.map((i) => i.merchant.id));
+    // 连续两天无安排时首推不同
+    expect(day2.items[0]!.merchant.id).not.toBe(day1First.items[0]!.merchant.id);
   });
 });
