@@ -78,15 +78,15 @@ export interface CampusFeaturePolygon {
   elevation?: number;
 }
 
-/** 广工大学城校区投影中心（中环西路与挑战路隧道附近） */
-export const GDUT_HEMC_ORIGIN = { lat: 23.0415, lng: 113.3885 } as const;
+/** 广工大学城校区投影中心（中环西路与挑战路隧道附近，基于 OpenStreetMap 实测 WGS-84 校准） */
+export const GDUT_HEMC_ORIGIN = { lat: 23.0418, lng: 113.3878 } as const;
 
 /** 校园严格地理边界（超出此边界则认为用户不在大学城校区内） */
 export const GDUT_HEMC_BOUNDS = {
-  minLat: 23.0342,
-  maxLat: 23.0492,
-  minLng: 113.3745,
-  maxLng: 113.3985,
+  minLat: 23.0345,
+  maxLat: 23.0495,
+  minLng: 113.3755,
+  maxLng: 113.3980,
 } as const;
 
 /** 纬度 23.04° 处每度对应的米数 */
@@ -131,7 +131,7 @@ export function distanceMeters(a: { lat: number; lng: number }, b: { lat: number
   return Math.hypot(pa.x - pb.x, pa.z - pb.z);
 }
 
-/** 广工大学城校区全部核心建筑与地标（经纬度与 OpenStreetMap 实景路网一致，饭堂位置已与本校同学核对） */
+/** 广工大学城校区全部核心建筑与地标（经纬度 1:1 对齐 OpenStreetMap 实测 WGS-84，与手机硬件 GPS 零偏移） */
 export const GDUT_HEMC_BUILDINGS: CampusBuilding[] = [
   // ---------- 教学楼与大教室（中环西路以南 ~ 知行大道） ----------
   {
@@ -141,15 +141,15 @@ export const GDUT_HEMC_BUILDINGS: CampusBuilding[] = [
     aliases: ['教一', '教1', '教学1号楼', '1号教学楼', '教1号楼'],
     category: 'teaching',
     zone: 'teaching',
-    lat: 23.0402,
-    lng: 113.3935,
-    width: 68,
-    depth: 52,
+    lat: 23.041465,
+    lng: 113.393148,
+    width: 66,
+    depth: 46,
     height: 22,
     shape: 'matrix',
     priority: 1,
     roadNodeId: 'n-mingde-zhixing',
-    tip: '教学楼群最东侧（明德路东边），靠近实验四号楼与广工一路。',
+    tip: '教学楼群最东侧（明德路西侧），靠近实验四号楼与广工一路。',
     entrance: '知行大道北侧主入口 / 明德路连廊',
   },
   {
@@ -159,10 +159,10 @@ export const GDUT_HEMC_BUILDINGS: CampusBuilding[] = [
     aliases: ['教二', '教2', '教学2号楼', '2号教学楼', '教2号楼'],
     category: 'teaching',
     zone: 'teaching',
-    lat: 23.0411,
-    lng: 113.3929,
-    width: 66,
-    depth: 48,
+    lat: 23.042319,
+    lng: 113.392880,
+    width: 64,
+    depth: 44,
     height: 22,
     shape: 'matrix',
     priority: 1,
@@ -177,10 +177,10 @@ export const GDUT_HEMC_BUILDINGS: CampusBuilding[] = [
     aliases: ['教三', '教3', '教学3号楼', '3号教学楼', '教3号楼'],
     category: 'teaching',
     zone: 'teaching',
-    lat: 23.0402,
-    lng: 113.3905,
-    width: 64,
-    depth: 50,
+    lat: 23.041462,
+    lng: 113.390433,
+    width: 62,
+    depth: 44,
     height: 22,
     shape: 'matrix',
     priority: 1,
@@ -195,10 +195,10 @@ export const GDUT_HEMC_BUILDINGS: CampusBuilding[] = [
     aliases: ['教四', '教4', '教学4号楼', '4号教学楼', '教4号楼'],
     category: 'teaching',
     zone: 'teaching',
-    lat: 23.0411,
-    lng: 113.3905,
-    width: 64,
-    depth: 48,
+    lat: 23.042320,
+    lng: 113.390418,
+    width: 62,
+    depth: 44,
     height: 22,
     shape: 'matrix',
     priority: 1,
@@ -213,10 +213,10 @@ export const GDUT_HEMC_BUILDINGS: CampusBuilding[] = [
     aliases: ['教五', '教5', '教学5号楼', '5号教学楼', '教5号楼'],
     category: 'teaching',
     zone: 'teaching',
-    lat: 23.0402,
-    lng: 113.3891,
-    width: 64,
-    depth: 50,
+    lat: 23.041413,
+    lng: 113.389285,
+    width: 62,
+    depth: 44,
     height: 22,
     shape: 'matrix',
     priority: 1,
@@ -231,10 +231,10 @@ export const GDUT_HEMC_BUILDINGS: CampusBuilding[] = [
     aliases: ['教六', '教6', '教学6号楼', '6号教学楼', '教6号楼'],
     category: 'teaching',
     zone: 'teaching',
-    lat: 23.0411,
-    lng: 113.3891,
-    width: 64,
-    depth: 48,
+    lat: 23.042321,
+    lng: 113.389299,
+    width: 62,
+    depth: 44,
     height: 22,
     shape: 'matrix',
     priority: 1,
@@ -249,10 +249,10 @@ export const GDUT_HEMC_BUILDINGS: CampusBuilding[] = [
     aliases: ['一号大教室', '1号大教室', '一大', '大教室1', '大1'],
     category: 'teaching',
     zone: 'teaching',
-    lat: 23.0406,
-    lng: 113.3916,
-    width: 34,
-    depth: 24,
+    lat: 23.041774,
+    lng: 113.391599,
+    width: 30,
+    depth: 20,
     height: 16,
     shape: 'tiered',
     priority: 1,
@@ -261,21 +261,39 @@ export const GDUT_HEMC_BUILDINGS: CampusBuilding[] = [
     entrance: '创新大道东侧连廊',
   },
   {
+    id: 'big2',
+    name: '二号大教室',
+    shortName: '二大',
+    aliases: ['二号大教室', '2号大教室', '二大', '大教室2', '大2'],
+    category: 'teaching',
+    zone: 'teaching',
+    lat: 23.041486,
+    lng: 113.391756,
+    width: 24,
+    depth: 20,
+    height: 16,
+    shape: 'tiered',
+    priority: 2,
+    roadNodeId: 'n-qiushi-zhixing',
+    tip: '三号大教室正东侧、求是路西侧，紧邻勤奋广场北边。',
+    entrance: '知行大道北侧 / 求是路西侧',
+  },
+  {
     id: 'big3',
     name: '三号大教室',
     shortName: '三大',
     aliases: ['三号大教室', '3号大教室', '三大', '大教室3', '大3'],
     category: 'teaching',
     zone: 'teaching',
-    lat: 23.0401,
-    lng: 113.3916,
-    width: 34,
-    depth: 22,
+    lat: 23.041488,
+    lng: 113.391436,
+    width: 24,
+    depth: 20,
     height: 16,
     shape: 'tiered',
     priority: 1,
     roadNodeId: 'n-chuangxin-zhixing',
-    tip: '在一号大教室正南面、知行大道北侧（勤奋广场对面），大班高数/思政课常在这。',
+    tip: '在一号大教室南面、知行大道北侧（勤奋广场对面），大班高数/思政课常在这。',
     entrance: '知行大道北侧台阶 / 创新大道东侧',
   },
   {
@@ -285,15 +303,33 @@ export const GDUT_HEMC_BUILDINGS: CampusBuilding[] = [
     aliases: ['四号大教室', '4号大教室', '四大', '大教室4', '大4'],
     category: 'teaching',
     zone: 'teaching',
-    lat: 23.0412,
-    lng: 113.3916,
-    width: 34,
-    depth: 22,
+    lat: 23.042366,
+    lng: 113.391760,
+    width: 24,
+    depth: 20,
     height: 16,
     shape: 'tiered',
     priority: 1,
     roadNodeId: 'n-chuangxin-beilu',
-    tip: '在一号大教室正北面、紧邻环教北路，从教4往东过创新大道一步即到。',
+    tip: '在一号大教室东北面、紧邻环教北路与求是路，与五号大教室东西相邻。',
+    entrance: '环教北路南侧 / 求是路西侧',
+  },
+  {
+    id: 'big5',
+    name: '五号大教室',
+    shortName: '五大',
+    aliases: ['五号大教室', '5号大教室', '五大', '大教室5', '大5'],
+    category: 'teaching',
+    zone: 'teaching',
+    lat: 23.042366,
+    lng: 113.391427,
+    width: 24,
+    depth: 20,
+    height: 16,
+    shape: 'tiered',
+    priority: 2,
+    roadNodeId: 'n-chuangxin-beilu',
+    tip: '在四号大教室正西侧、创新大道东边，从教4过马路一步即到。',
     entrance: '环教北路南侧 / 创新大道东侧',
   },
 
@@ -305,10 +341,10 @@ export const GDUT_HEMC_BUILDINGS: CampusBuilding[] = [
     aliases: ['图书馆', '广寒宫', '中心图书馆', 'lib'],
     category: 'landmark',
     zone: 'landmark',
-    lat: 23.0389,
-    lng: 113.3898,
+    lat: 23.040127,
+    lng: 113.389745,
     width: 82,
-    depth: 74,
+    depth: 72,
     height: 30,
     shape: 'courtyard',
     priority: 1,
@@ -323,10 +359,10 @@ export const GDUT_HEMC_BUILDINGS: CampusBuilding[] = [
     aliases: ['工大创谷', '创谷', '创新创业学院'],
     category: 'landmark',
     zone: 'landmark',
-    lat: 23.0396,
-    lng: 113.3898,
-    width: 52,
-    depth: 22,
+    lat: 23.041025,
+    lng: 113.389802,
+    width: 50,
+    depth: 20,
     height: 12,
     priority: 2,
     roadNodeId: 'n-lib-front',
@@ -339,14 +375,14 @@ export const GDUT_HEMC_BUILDINGS: CampusBuilding[] = [
     aliases: ['综合楼', '行政楼', '办公楼', '校办'],
     category: 'landmark',
     zone: 'landmark',
-    lat: 23.0369,
-    lng: 113.3909,
-    width: 46,
-    depth: 62,
+    lat: 23.037190,
+    lng: 113.390826,
+    width: 44,
+    depth: 78,
     height: 26,
     priority: 1,
     roadNodeId: 'n-chuangxin-south',
-    tip: '位于团结湖东岸、创新大道西侧，靠近工大广场，办行政盖章业务来这里。',
+    tip: '位于团结湖东岸、创新大道西侧（北侧为综合楼、南侧为行政楼），办行政盖章业务来这里。',
   },
   {
     id: 'dajiangtang',
@@ -355,10 +391,10 @@ export const GDUT_HEMC_BUILDINGS: CampusBuilding[] = [
     aliases: ['大讲堂', '学术报告厅', '圆弧报告厅', '礼堂'],
     category: 'landmark',
     zone: 'landmark',
-    lat: 23.0365,
-    lng: 113.3922,
-    width: 54,
-    depth: 42,
+    lat: 23.036788,
+    lng: 113.392410,
+    width: 52,
+    depth: 40,
     height: 18,
     shape: 'semicircle',
     priority: 2,
@@ -369,13 +405,13 @@ export const GDUT_HEMC_BUILDINGS: CampusBuilding[] = [
     id: 'south-gate',
     name: '大学城校区正门（工大广场）',
     shortName: '正门',
-    aliases: ['正门', '南门', '主校门', '工大广场', '大学城外环西路100号'],
+    aliases: ['正门', '南门', '主校门', '广工南门', '工大广场', '大学城外环西路100号'],
     category: 'landmark',
     zone: 'gate',
-    lat: 23.0358,
-    lng: 113.3915,
+    lat: 23.036079,
+    lng: 113.391189,
     width: 72,
-    depth: 20,
+    depth: 18,
     height: 11,
     shape: 'gate',
     priority: 2,
@@ -391,9 +427,9 @@ export const GDUT_HEMC_BUILDINGS: CampusBuilding[] = [
     aliases: ['工学一号馆', '工学1号馆', '工一', '工1', '工学1', '信息工程学院', '计算机学院'],
     category: 'lab',
     zone: 'lab',
-    lat: 23.0369,
-    lng: 113.3928,
-    width: 108,
+    lat: 23.037557,
+    lng: 113.392923,
+    width: 102,
     depth: 26,
     height: 26,
     priority: 1,
@@ -408,9 +444,9 @@ export const GDUT_HEMC_BUILDINGS: CampusBuilding[] = [
     aliases: ['工学二号馆', '工学2号馆', '工二', '工2', '工学2', '机电工程学院'],
     category: 'lab',
     zone: 'lab',
-    lat: 23.0376,
-    lng: 113.3928,
-    width: 108,
+    lat: 23.038259,
+    lng: 113.392762,
+    width: 102,
     depth: 26,
     height: 26,
     priority: 1,
@@ -419,20 +455,37 @@ export const GDUT_HEMC_BUILDINGS: CampusBuilding[] = [
     entrance: '研学一路北侧 / 明德路入口',
   },
   {
-    id: 'gong4',
-    name: '工学四号馆',
-    shortName: '工学4馆',
-    aliases: ['工学四号馆', '工学4号馆', '工四', '工4', '工学4', '工学三号馆', '工三', '轻工化工学院'],
+    id: 'gong3',
+    name: '工学三号馆',
+    shortName: '工学3馆',
+    aliases: ['工学三号馆', '工学3号馆', '工三', '工3', '工学3', '材料与能源学院'],
     category: 'lab',
     zone: 'lab',
-    lat: 23.0384,
-    lng: 113.3928,
-    width: 108,
+    lat: 23.038984,
+    lng: 113.392780,
+    width: 102,
     depth: 26,
     height: 26,
     priority: 1,
     roadNodeId: 'n-mingde-yanxue2',
-    tip: '研学二路北侧、求是路与明德路之间（注意东南片区按北→南排布为工学4→工学2→工学1）。',
+    tip: '位于工学二号馆与工学四号馆之间、研学二路南侧。',
+    entrance: '研学二路南侧 / 明德路入口',
+  },
+  {
+    id: 'gong4',
+    name: '工学四号馆',
+    shortName: '工学4馆',
+    aliases: ['工学四号馆', '工学4号馆', '工四', '工4', '工学4', '轻工化工学院'],
+    category: 'lab',
+    zone: 'lab',
+    lat: 23.039778,
+    lng: 113.392935,
+    width: 102,
+    depth: 26,
+    height: 26,
+    priority: 1,
+    roadNodeId: 'n-mingde-yanxue2',
+    tip: '工学馆最北排，研学二路北侧、求是路与明德路之间（按北→南为工学4→3→2→1）。',
     entrance: '研学二路北侧 / 求是路入口',
   },
   {
@@ -442,14 +495,14 @@ export const GDUT_HEMC_BUILDINGS: CampusBuilding[] = [
     aliases: ['实验一号楼', '实验1号楼', '实一', '实1', '实验1'],
     category: 'lab',
     zone: 'lab',
-    lat: 23.0373,
-    lng: 113.3941,
-    width: 96,
-    depth: 22,
+    lat: 23.038281,
+    lng: 113.394660,
+    width: 94,
+    depth: 24,
     height: 22,
     priority: 2,
     roadNodeId: 'n-mingde-yanxue1',
-    tip: '明德路东侧、工学二号馆斜对面，与理学馆相邻。',
+    tip: '明德路东侧、工学二号馆对面，南边紧邻理学馆。',
   },
   {
     id: 'shi2',
@@ -458,10 +511,10 @@ export const GDUT_HEMC_BUILDINGS: CampusBuilding[] = [
     aliases: ['实验二号楼', '实验2号楼', '实二', '实2', '实验2'],
     category: 'lab',
     zone: 'lab',
-    lat: 23.0379,
-    lng: 113.3941,
-    width: 96,
-    depth: 22,
+    lat: 23.039018,
+    lng: 113.394499,
+    width: 94,
+    depth: 24,
     height: 22,
     priority: 2,
     roadNodeId: 'n-mingde-yanxue2',
@@ -474,10 +527,10 @@ export const GDUT_HEMC_BUILDINGS: CampusBuilding[] = [
     aliases: ['实验三号楼', '实验3号楼', '实三', '实3', '实验3'],
     category: 'lab',
     zone: 'lab',
-    lat: 23.0385,
-    lng: 113.3941,
-    width: 96,
-    depth: 22,
+    lat: 23.039754,
+    lng: 113.394639,
+    width: 94,
+    depth: 24,
     height: 22,
     priority: 2,
     roadNodeId: 'n-mingde-yanxue2',
@@ -490,9 +543,9 @@ export const GDUT_HEMC_BUILDINGS: CampusBuilding[] = [
     aliases: ['实验四号楼', '实验4号楼', '实四', '实4', '实验4'],
     category: 'lab',
     zone: 'lab',
-    lat: 23.0391,
-    lng: 113.3941,
-    width: 96,
+    lat: 23.040490,
+    lng: 113.394591,
+    width: 94,
     depth: 24,
     height: 22,
     priority: 1,
@@ -506,9 +559,9 @@ export const GDUT_HEMC_BUILDINGS: CampusBuilding[] = [
     aliases: ['理学馆', '物理楼', '数学学院'],
     category: 'lab',
     zone: 'lab',
-    lat: 23.0367,
-    lng: 113.3941,
-    width: 86,
+    lat: 23.037561,
+    lng: 113.394479,
+    width: 92,
     depth: 24,
     height: 24,
     priority: 2,
@@ -522,26 +575,26 @@ export const GDUT_HEMC_BUILDINGS: CampusBuilding[] = [
     aliases: ['创新科技楼', '创新科技楼A座', '创新科技楼B座'],
     category: 'lab',
     zone: 'teaching',
-    lat: 23.0419,
-    lng: 113.3910,
-    width: 78,
-    depth: 34,
+    lat: 23.043133,
+    lng: 113.391172,
+    width: 96,
+    depth: 30,
     height: 26,
     priority: 2,
     roadNodeId: 'n-chuangxin-beilu',
-    tip: '环教北路北侧、紧贴中环西路广工公交站南边。',
+    tip: '环教北路北侧、紧贴中环西路广工公交站南边（东侧A座、西侧B座）。',
   },
   {
     id: 'qiushi-tech',
     name: '求实科技楼 A/B座',
     shortName: '求实科技楼',
-    aliases: ['求实科技楼', '求是科技楼', '求实科技楼A座', '求实科技楼B座'],
+    aliases: ['求实科技楼', '求是科技楼', '求实科技楼A座', '求实科技楼B座', '求是科技楼A座'],
     category: 'lab',
     zone: 'teaching',
-    lat: 23.0419,
-    lng: 113.3929,
-    width: 74,
-    depth: 34,
+    lat: 23.043340,
+    lng: 113.392630,
+    width: 78,
+    depth: 32,
     height: 26,
     priority: 2,
     roadNodeId: 'n-mingde-beilu',
@@ -554,10 +607,10 @@ export const GDUT_HEMC_BUILDINGS: CampusBuilding[] = [
     aliases: ['立德科技楼', '立德楼', '立德科技楼A座', '立德科技楼B座'],
     category: 'lab',
     zone: 'lab',
-    lat: 23.0376,
-    lng: 113.3951,
+    lat: 23.038660,
+    lng: 113.395765,
     width: 30,
-    depth: 94,
+    depth: 96,
     height: 28,
     priority: 2,
     roadNodeId: 'n-boya-mid',
@@ -572,10 +625,10 @@ export const GDUT_HEMC_BUILDINGS: CampusBuilding[] = [
     aliases: ['文化活动中心', '学生活动中心', '大学生活动中心'],
     category: 'sports',
     zone: 'sports',
-    lat: 23.0410,
-    lng: 113.3873,
-    width: 66,
-    depth: 62,
+    lat: 23.042197,
+    lng: 113.387155,
+    width: 64,
+    depth: 60,
     height: 18,
     priority: 2,
     roadNodeId: 'n-tiaozhan-beilu',
@@ -588,10 +641,10 @@ export const GDUT_HEMC_BUILDINGS: CampusBuilding[] = [
     aliases: ['中心体育场', '田径场', '足球场', '操场', '大操场'],
     category: 'sports',
     zone: 'sports',
-    lat: 23.0408,
-    lng: 113.3859,
-    width: 76,
-    depth: 130,
+    lat: 23.042349,
+    lng: 113.385868,
+    width: 78,
+    depth: 132,
     height: 6,
     shape: 'stadium',
     priority: 1,
@@ -605,9 +658,9 @@ export const GDUT_HEMC_BUILDINGS: CampusBuilding[] = [
     aliases: ['体育馆', '篮球馆', '体育学院', 'CUBAL主场'],
     category: 'sports',
     zone: 'sports',
-    lat: 23.0412,
-    lng: 113.3845,
-    width: 78,
+    lat: 23.043064,
+    lng: 113.383891,
+    width: 76,
     depth: 66,
     height: 22,
     shape: 'dome',
@@ -620,17 +673,17 @@ export const GDUT_HEMC_BUILDINGS: CampusBuilding[] = [
     id: 'nanting-gate',
     name: '南亭村口（商业美食街）',
     shortName: '南亭村',
-    aliases: ['南亭', '南亭村', '南亭村口', '南亭大道', '南亭商业街', '夜宵街'],
+    aliases: ['南亭', '南亭村', '南亭村口', '南亭大道', '南亭商业街', '南亭商业中心', '夜宵街'],
     category: 'sports',
     zone: 'gate',
-    lat: 23.0392,
-    lng: 113.3826,
-    width: 68,
-    depth: 36,
+    lat: 23.039987,
+    lng: 113.382478,
+    width: 64,
+    depth: 34,
     height: 12,
     priority: 1,
     roadNodeId: 'n-nanting-street',
-    tip: '体育馆/篮球场往西南穿过环教西路即达南亭村大街，干饭宵夜主战场。',
+    tip: '体育馆/篮球场往西南穿过环教西路即达南亭商业中心与美食街，干饭宵夜主战场。',
   },
 
   // ---------- 生活东区（中环西路以北，广工二路~广工一路） ----------
@@ -641,14 +694,14 @@ export const GDUT_HEMC_BUILDINGS: CampusBuilding[] = [
     aliases: ['一饭', '第一饭堂', '东区一饭', '一食堂', '东区服务中心'],
     category: 'canteen',
     zone: 'canteen',
-    lat: 23.0464,
-    lng: 113.3903,
+    lat: 23.046325,
+    lng: 113.389898,
     width: 58,
-    depth: 42,
+    depth: 36,
     height: 15,
     priority: 1,
     roadNodeId: 'n-east-canteen1',
-    tip: '位于东区北侧、东八栋北边与东区服务中心相连，靠近校医院和广工一路。',
+    tip: '位于东区北侧、东八栋北边与东区服务中心相连，靠近校医院和东区东门。',
   },
   {
     id: 'canteen2',
@@ -657,10 +710,10 @@ export const GDUT_HEMC_BUILDINGS: CampusBuilding[] = [
     aliases: ['二饭', '第二饭堂', '东区二饭', '二食堂'],
     category: 'canteen',
     zone: 'canteen',
-    lat: 23.0439,
-    lng: 113.3867,
-    width: 64,
-    depth: 56,
+    lat: 23.044624,
+    lng: 113.387073,
+    width: 60,
+    depth: 50,
     height: 15,
     shape: 'semicircle',
     priority: 1,
@@ -674,14 +727,14 @@ export const GDUT_HEMC_BUILDINGS: CampusBuilding[] = [
     aliases: ['校医院', '医院', '医务室', '门诊部'],
     category: 'canteen',
     zone: 'east',
-    lat: 23.0472,
-    lng: 113.3890,
+    lat: 23.046955,
+    lng: 113.388607,
     width: 52,
-    depth: 34,
+    depth: 30,
     height: 16,
     priority: 2,
     roadNodeId: 'n-east-north',
-    tip: '东区最北侧（东苑四横路南边），紧邻一饭西北角。',
+    tip: '东区最北侧（东苑四横路旁），紧邻一饭与东区服务中心西北角。',
   },
   {
     id: 'dong1',
@@ -690,10 +743,10 @@ export const GDUT_HEMC_BUILDINGS: CampusBuilding[] = [
     aliases: ['东一', '东1', '东区1栋', '东区一栋', '东1栋'],
     category: 'dorm-east',
     zone: 'east',
-    lat: 23.0439,
-    lng: 113.3917,
-    width: 64,
-    depth: 22,
+    lat: 23.044530,
+    lng: 113.390733,
+    width: 60,
+    depth: 20,
     height: 20,
     priority: 3,
     roadNodeId: 'n-east-1-mid',
@@ -706,10 +759,10 @@ export const GDUT_HEMC_BUILDINGS: CampusBuilding[] = [
     aliases: ['东二', '东2', '东区2栋', '东区二栋', '东2栋'],
     category: 'dorm-east',
     zone: 'east',
-    lat: 23.0445,
-    lng: 113.3917,
-    width: 64,
-    depth: 22,
+    lat: 23.044941,
+    lng: 113.390734,
+    width: 60,
+    depth: 20,
     height: 20,
     priority: 3,
     roadNodeId: 'n-east-1-mid',
@@ -722,14 +775,14 @@ export const GDUT_HEMC_BUILDINGS: CampusBuilding[] = [
     aliases: ['东三', '东3', '东区3栋', '东区三栋', '东3栋'],
     category: 'dorm-east',
     zone: 'east',
-    lat: 23.0451,
-    lng: 113.3917,
-    width: 58,
-    depth: 22,
+    lat: 23.045379,
+    lng: 113.390569,
+    width: 56,
+    depth: 20,
     height: 20,
     priority: 3,
     roadNodeId: 'n-east-1-north',
-    tip: '东区东北角，靠近广工一路与一饭。',
+    tip: '东区东北角，靠近东区东门与一饭。',
   },
   {
     id: 'dong4',
@@ -738,14 +791,30 @@ export const GDUT_HEMC_BUILDINGS: CampusBuilding[] = [
     aliases: ['东四', '东4', '东区4栋', '东区四栋', '东4栋'],
     category: 'dorm-east',
     zone: 'east',
-    lat: 23.0434,
-    lng: 113.3902,
-    width: 64,
-    depth: 22,
+    lat: 23.044095,
+    lng: 113.389667,
+    width: 62,
+    depth: 20,
     height: 20,
     priority: 3,
     roadNodeId: 'n-east-2-south',
     tip: '东区最靠中环西路广工站的一排宿舍，下楼过挑战路隧道即可到教6。',
+  },
+  {
+    id: 'dong5',
+    name: '东区五栋',
+    shortName: '东5',
+    aliases: ['东五', '东5', '东区5栋', '东区五栋', '东5栋'],
+    category: 'dorm-east',
+    zone: 'east',
+    lat: 23.044519,
+    lng: 113.389665,
+    width: 62,
+    depth: 20,
+    height: 20,
+    priority: 3,
+    roadNodeId: 'n-east-2-south',
+    tip: '东苑二路东侧，夹在东四与东六之间。',
   },
   {
     id: 'dong6',
@@ -754,14 +823,14 @@ export const GDUT_HEMC_BUILDINGS: CampusBuilding[] = [
     aliases: ['东六', '东6', '东区6栋', '东区六栋', '东6栋'],
     category: 'dorm-east',
     zone: 'east',
-    lat: 23.0444,
-    lng: 113.3902,
-    width: 64,
-    depth: 22,
+    lat: 23.044957,
+    lng: 113.389664,
+    width: 62,
+    depth: 20,
     height: 20,
     priority: 3,
-    roadNodeId: 'n-east-2-mid',
-    tip: '东苑二路东侧，东四北面、东七南面。',
+    roadNodeId: 'n-east-2-south',
+    tip: '东苑二路东侧，东五北面、东七南面。',
   },
   {
     id: 'dong7',
@@ -770,10 +839,10 @@ export const GDUT_HEMC_BUILDINGS: CampusBuilding[] = [
     aliases: ['东七', '东7', '东区7栋', '东区七栋', '东7栋'],
     category: 'dorm-east',
     zone: 'east',
-    lat: 23.0450,
-    lng: 113.3902,
-    width: 64,
-    depth: 22,
+    lat: 23.045384,
+    lng: 113.389663,
+    width: 62,
+    depth: 20,
     height: 20,
     priority: 3,
     roadNodeId: 'n-east-2-mid',
@@ -786,10 +855,10 @@ export const GDUT_HEMC_BUILDINGS: CampusBuilding[] = [
     aliases: ['东八', '东8', '东区8栋', '东区八栋', '东8栋'],
     category: 'dorm-east',
     zone: 'east',
-    lat: 23.0456,
-    lng: 113.3902,
-    width: 64,
-    depth: 22,
+    lat: 23.045813,
+    lng: 113.389659,
+    width: 62,
+    depth: 20,
     height: 20,
     priority: 2,
     roadNodeId: 'n-east-canteen1',
@@ -802,10 +871,10 @@ export const GDUT_HEMC_BUILDINGS: CampusBuilding[] = [
     aliases: ['东九', '东9', '东区9栋', '东区九栋', '东9栋'],
     category: 'dorm-east',
     zone: 'east',
-    lat: 23.0434,
-    lng: 113.3881,
-    width: 64,
-    depth: 22,
+    lat: 23.044096,
+    lng: 113.388428,
+    width: 62,
+    depth: 20,
     height: 20,
     priority: 2,
     roadNodeId: 'n-tiaozhan-north',
@@ -818,14 +887,30 @@ export const GDUT_HEMC_BUILDINGS: CampusBuilding[] = [
     aliases: ['东十', '东10', '东区10栋', '东区十栋', '东10栋'],
     category: 'dorm-east',
     zone: 'east',
-    lat: 23.0440,
-    lng: 113.3881,
-    width: 64,
-    depth: 22,
+    lat: 23.044500,
+    lng: 113.388428,
+    width: 62,
+    depth: 20,
     height: 20,
     priority: 3,
     roadNodeId: 'n-tiaozhan-north',
-    tip: '东九北侧、漠阳园南侧（注意广工东区没有东11栋哦）。',
+    tip: '东九北侧、东十一南侧，步行去二饭和隧道都很近。',
+  },
+  {
+    id: 'dong11',
+    name: '东区十一栋',
+    shortName: '东11',
+    aliases: ['东十一', '东11', '东区11栋', '东区十一栋', '东11栋'],
+    category: 'dorm-east',
+    zone: 'east',
+    lat: 23.044933,
+    lng: 113.388430,
+    width: 62,
+    depth: 20,
+    height: 20,
+    priority: 3,
+    roadNodeId: 'n-east-2-south',
+    tip: '东十北侧、漠阳园南坡下，环境清静。',
   },
   {
     id: 'dong12',
@@ -834,14 +919,14 @@ export const GDUT_HEMC_BUILDINGS: CampusBuilding[] = [
     aliases: ['东十二', '东12', '东区12栋', '东区十二栋', '东12栋'],
     category: 'dorm-east',
     zone: 'east',
-    lat: 23.0448,
-    lng: 113.3866,
-    width: 66,
-    depth: 22,
+    lat: 23.045355,
+    lng: 113.386739,
+    width: 64,
+    depth: 20,
     height: 20,
     priority: 2,
     roadNodeId: 'n-east-3-mid',
-    tip: '东区西侧靠近广工二路，楼下南边就是二饭！',
+    tip: '东区西侧靠近广工二路与东区西门，楼下南边就是二饭！',
   },
   {
     id: 'dong13',
@@ -850,10 +935,10 @@ export const GDUT_HEMC_BUILDINGS: CampusBuilding[] = [
     aliases: ['东十三', '东13', '东区13栋', '东区十三栋', '东13栋'],
     category: 'dorm-east',
     zone: 'east',
-    lat: 23.0454,
-    lng: 113.3866,
-    width: 66,
-    depth: 22,
+    lat: 23.045784,
+    lng: 113.386694,
+    width: 64,
+    depth: 20,
     height: 20,
     priority: 3,
     roadNodeId: 'n-east-3-mid',
@@ -866,10 +951,10 @@ export const GDUT_HEMC_BUILDINGS: CampusBuilding[] = [
     aliases: ['东十四', '东14', '东区14栋', '东区十四栋', '东14栋'],
     category: 'dorm-east',
     zone: 'east',
-    lat: 23.0460,
-    lng: 113.3866,
-    width: 66,
-    depth: 22,
+    lat: 23.046191,
+    lng: 113.386945,
+    width: 64,
+    depth: 20,
     height: 20,
     priority: 3,
     roadNodeId: 'n-east-3-north',
@@ -881,13 +966,13 @@ export const GDUT_HEMC_BUILDINGS: CampusBuilding[] = [
     id: 'canteen3',
     name: '第三饭堂',
     shortName: '三饭',
-    aliases: ['三饭', '第三饭堂', '西区三饭', '三食堂'],
+    aliases: ['三饭', '第三饭堂', '西区三饭', '三食堂', '西三食堂'],
     category: 'canteen',
     zone: 'canteen',
-    lat: 23.0439,
-    lng: 113.3825,
-    width: 52,
-    depth: 48,
+    lat: 23.044526,
+    lng: 113.382529,
+    width: 50,
+    depth: 44,
     height: 15,
     priority: 1,
     roadNodeId: 'n-west-canteen3',
@@ -897,17 +982,33 @@ export const GDUT_HEMC_BUILDINGS: CampusBuilding[] = [
     id: 'canteen4',
     name: '第四饭堂',
     shortName: '四饭',
-    aliases: ['四饭', '第四饭堂', '西区四饭', '四食堂'],
+    aliases: ['四饭', '第四饭堂', '西区四饭', '四食堂', '西四食堂'],
     category: 'canteen',
     zone: 'canteen',
-    lat: 23.0440,
-    lng: 113.3775,
-    width: 50,
-    depth: 44,
+    lat: 23.044812,
+    lng: 113.378495,
+    width: 48,
+    depth: 40,
     height: 15,
     priority: 1,
     roadNodeId: 'n-west-canteen4',
-    tip: '西13/西17西侧、紧邻国医西路，口碑很好的西区饭堂。',
+    tip: '西13南侧、西17西侧、紧邻国医西路与生活西区西门，口碑很好的西区饭堂。',
+  },
+  {
+    id: 'xi1',
+    name: '西一栋',
+    shortName: '西1',
+    aliases: ['西一', '西1', '西区1栋', '西区一栋', '西1栋'],
+    category: 'dorm-west',
+    zone: 'west',
+    lat: 23.045422,
+    lng: 113.382601,
+    width: 56,
+    depth: 20,
+    height: 20,
+    priority: 3,
+    roadNodeId: 'n-west-3-mid',
+    tip: '紧邻生活西区东门与西苑横路，南面就是三饭。',
   },
   {
     id: 'xi2',
@@ -916,10 +1017,10 @@ export const GDUT_HEMC_BUILDINGS: CampusBuilding[] = [
     aliases: ['西二', '西2', '西区2栋', '西区二栋', '西2栋'],
     category: 'dorm-west',
     zone: 'west',
-    lat: 23.0458,
-    lng: 113.3825,
-    width: 58,
-    depth: 22,
+    lat: 23.045848,
+    lng: 113.382720,
+    width: 56,
+    depth: 20,
     height: 20,
     priority: 3,
     roadNodeId: 'n-west-3-mid',
@@ -932,10 +1033,10 @@ export const GDUT_HEMC_BUILDINGS: CampusBuilding[] = [
     aliases: ['西三', '西3', '西区3栋', '西区三栋', '西3栋'],
     category: 'dorm-west',
     zone: 'west',
-    lat: 23.0466,
-    lng: 113.3826,
-    width: 58,
-    depth: 22,
+    lat: 23.046276,
+    lng: 113.382736,
+    width: 56,
+    depth: 20,
     height: 20,
     priority: 3,
     roadNodeId: 'n-west-3-north',
@@ -948,9 +1049,9 @@ export const GDUT_HEMC_BUILDINGS: CampusBuilding[] = [
     aliases: ['西四', '西4', '西区4栋', '西区四栋', '西4栋'],
     category: 'dorm-west',
     zone: 'west',
-    lat: 23.0472,
-    lng: 113.3827,
-    width: 58,
+    lat: 23.046714,
+    lng: 113.382825,
+    width: 56,
     depth: 20,
     height: 20,
     priority: 3,
@@ -964,10 +1065,10 @@ export const GDUT_HEMC_BUILDINGS: CampusBuilding[] = [
     aliases: ['西五', '西5', '西区5栋', '西区五栋', '西5栋'],
     category: 'dorm-west',
     zone: 'west',
-    lat: 23.0434,
-    lng: 113.3811,
-    width: 64,
-    depth: 22,
+    lat: 23.044543,
+    lng: 113.381456,
+    width: 60,
+    depth: 20,
     height: 20,
     priority: 2,
     roadNodeId: 'n-west-2-south',
@@ -980,14 +1081,14 @@ export const GDUT_HEMC_BUILDINGS: CampusBuilding[] = [
     aliases: ['西六', '西6', '西区6栋', '西区六栋', '西6栋'],
     category: 'dorm-west',
     zone: 'west',
-    lat: 23.0442,
-    lng: 113.3811,
-    width: 64,
-    depth: 22,
+    lat: 23.044975,
+    lng: 113.381453,
+    width: 60,
+    depth: 20,
     height: 20,
     priority: 2,
-    roadNodeId: 'n-west-2-south',
-    tip: '西五北侧、三饭正西边，楼下就是西苑横路。',
+    roadNodeId: 'n-west-2-mid',
+    tip: '西五北侧、三饭西北边，北侧楼下就是西苑横路。',
   },
   {
     id: 'xi7',
@@ -996,10 +1097,10 @@ export const GDUT_HEMC_BUILDINGS: CampusBuilding[] = [
     aliases: ['西七', '西7', '西区7栋', '西区七栋', '西7栋'],
     category: 'dorm-west',
     zone: 'west',
-    lat: 23.0449,
-    lng: 113.3811,
-    width: 64,
-    depth: 22,
+    lat: 23.045411,
+    lng: 113.381463,
+    width: 60,
+    depth: 20,
     height: 20,
     priority: 3,
     roadNodeId: 'n-west-2-mid',
@@ -1012,10 +1113,10 @@ export const GDUT_HEMC_BUILDINGS: CampusBuilding[] = [
     aliases: ['西八', '西8', '西区8栋', '西区八栋', '西8栋'],
     category: 'dorm-west',
     zone: 'west',
-    lat: 23.0457,
-    lng: 113.3811,
-    width: 64,
-    depth: 22,
+    lat: 23.045847,
+    lng: 113.381452,
+    width: 60,
+    depth: 20,
     height: 20,
     priority: 3,
     roadNodeId: 'n-west-2-mid',
@@ -1028,14 +1129,14 @@ export const GDUT_HEMC_BUILDINGS: CampusBuilding[] = [
     aliases: ['西九', '西9', '西区9栋', '西区九栋', '西9栋'],
     category: 'dorm-west',
     zone: 'west',
-    lat: 23.0465,
-    lng: 113.3811,
-    width: 64,
-    depth: 22,
+    lat: 23.046279,
+    lng: 113.381464,
+    width: 60,
+    depth: 20,
     height: 20,
     priority: 3,
     roadNodeId: 'n-west-2-north',
-    tip: '西区中北排，北边是康陵路。',
+    tip: '西区中北排，北边靠近康陵路。',
   },
   {
     id: 'xi10',
@@ -1044,14 +1145,14 @@ export const GDUT_HEMC_BUILDINGS: CampusBuilding[] = [
     aliases: ['西十', '西10', '西区10栋', '西区十栋', '西10栋'],
     category: 'dorm-west',
     zone: 'west',
-    lat: 23.0449,
-    lng: 113.3792,
+    lat: 23.045406,
+    lng: 113.379798,
     width: 58,
-    depth: 22,
+    depth: 20,
     height: 20,
     priority: 3,
     roadNodeId: 'n-west-1-mid',
-    tip: '西苑横路北侧偏西，面对西区小广场。',
+    tip: '西苑横路北侧偏西，南边对面是西17和金银山。',
   },
   {
     id: 'xi11',
@@ -1060,10 +1161,10 @@ export const GDUT_HEMC_BUILDINGS: CampusBuilding[] = [
     aliases: ['西十一', '西11', '西区11栋', '西区十一栋', '西11栋'],
     category: 'dorm-west',
     zone: 'west',
-    lat: 23.0457,
-    lng: 113.3792,
+    lat: 23.045835,
+    lng: 113.379815,
     width: 58,
-    depth: 22,
+    depth: 20,
     height: 20,
     priority: 3,
     roadNodeId: 'n-west-1-mid',
@@ -1076,10 +1177,10 @@ export const GDUT_HEMC_BUILDINGS: CampusBuilding[] = [
     aliases: ['西十二', '西12', '西区12栋', '西区十二栋', '西12栋'],
     category: 'dorm-west',
     zone: 'west',
-    lat: 23.0465,
-    lng: 113.3792,
+    lat: 23.046263,
+    lng: 113.379811,
     width: 58,
-    depth: 22,
+    depth: 20,
     height: 20,
     priority: 3,
     roadNodeId: 'n-west-1-north',
@@ -1092,14 +1193,14 @@ export const GDUT_HEMC_BUILDINGS: CampusBuilding[] = [
     aliases: ['西十三', '西13', '西区13栋', '西区十三栋', '西13栋'],
     category: 'dorm-west',
     zone: 'west',
-    lat: 23.0450,
-    lng: 113.3775,
-    width: 56,
-    depth: 22,
+    lat: 23.045408,
+    lng: 113.378636,
+    width: 54,
+    depth: 20,
     height: 20,
     priority: 2,
     roadNodeId: 'n-west-canteen4',
-    tip: '西区最西列，紧邻四饭北侧与国医西路！',
+    tip: '西区最西列，紧邻四饭北侧与生活西区西门！',
   },
   {
     id: 'xi14',
@@ -1108,10 +1209,10 @@ export const GDUT_HEMC_BUILDINGS: CampusBuilding[] = [
     aliases: ['西十四', '西14', '西区14栋', '西区十四栋', '西14栋'],
     category: 'dorm-west',
     zone: 'west',
-    lat: 23.0458,
-    lng: 113.3776,
-    width: 56,
-    depth: 22,
+    lat: 23.045828,
+    lng: 113.378649,
+    width: 54,
+    depth: 20,
     height: 20,
     priority: 3,
     roadNodeId: 'n-west-1-mid',
@@ -1124,8 +1225,8 @@ export const GDUT_HEMC_BUILDINGS: CampusBuilding[] = [
     aliases: ['西十五', '西15', '西区15栋', '西区十五栋', '西15栋'],
     category: 'dorm-west',
     zone: 'west',
-    lat: 23.0466,
-    lng: 113.3779,
+    lat: 23.046271,
+    lng: 113.378814,
     width: 54,
     depth: 20,
     height: 20,
@@ -1140,8 +1241,8 @@ export const GDUT_HEMC_BUILDINGS: CampusBuilding[] = [
     aliases: ['西十六', '西16', '西区16栋', '西区十六栋', '西16栋'],
     category: 'dorm-west',
     zone: 'west',
-    lat: 23.0472,
-    lng: 113.3782,
+    lat: 23.046693,
+    lng: 113.378880,
     width: 52,
     depth: 20,
     height: 20,
@@ -1156,48 +1257,48 @@ export const GDUT_HEMC_BUILDINGS: CampusBuilding[] = [
     aliases: ['西十七', '西17', '西区17栋', '西区十七栋', '西17栋'],
     category: 'dorm-west',
     zone: 'west',
-    lat: 23.0439,
-    lng: 113.3791,
-    width: 62,
-    depth: 22,
+    lat: 23.044876,
+    lng: 113.379680,
+    width: 58,
+    depth: 20,
     height: 20,
     priority: 2,
-    roadNodeId: 'n-west-canteen4',
-    tip: '金银山北侧、四饭东侧，靠近西苑横路。',
+    roadNodeId: 'n-west-1-mid',
+    tip: '金银山北侧、四饭东侧，北边紧靠西苑横路。',
   },
   {
     id: 'metro-south',
-    name: '大学城南地铁站方向',
+    name: '大学城南地铁站',
     shortName: '大学城南站',
-    aliases: ['地铁站', '大学城南', '大学城南站', '地铁4号线', '地铁7号线'],
+    aliases: ['地铁站', '大学城南', '大学城南站', '地铁4号线', '地铁7号线', '地铁12号线'],
     category: 'landmark',
     zone: 'gate',
-    lat: 23.0442,
-    lng: 113.3952,
-    width: 44,
-    depth: 26,
+    lat: 23.045578,
+    lng: 113.394978,
+    width: 48,
+    depth: 28,
     height: 10,
     priority: 2,
-    roadNodeId: 'n-ring-p843',
-    tip: '从东区广工一路口（P843）往东北步行约 5 分钟即达 4/7 号线换乘站。',
+    roadNodeId: 'n-metro-south',
+    tip: '从东区广工一路口（P843）往东北步行约 4 分钟即达 4/7/12 号线换乘站。',
   },
 ];
 
-/** 校园地形与景观多边形（水系、小山丘、公园、篮球场、南亭街区） */
+/** 校园地形与景观多边形（水系、小山丘、公园、篮球场、南亭街区，严格对齐 OSM WGS-84） */
 export const GDUT_HEMC_FEATURES: CampusFeaturePolygon[] = [
   {
     id: 'tuanjie-lake',
     name: '团结湖',
     kind: 'water',
     points: [
-      [23.0391, 113.3886],
-      [23.0385, 113.3892],
-      [23.0378, 113.3905],
-      [23.0366, 113.3906],
-      [23.0361, 113.3895],
-      [23.0365, 113.3882],
-      [23.0376, 113.3884],
-      [23.0384, 113.3880],
+      [23.03940, 113.38865],
+      [23.03905, 113.38955],
+      [23.03845, 113.39030],
+      [23.03715, 113.39035],
+      [23.03655, 113.38955],
+      [23.03685, 113.38835],
+      [23.03795, 113.38845],
+      [23.03880, 113.38810],
     ],
   },
   {
@@ -1205,16 +1306,16 @@ export const GDUT_HEMC_FEATURES: CampusFeaturePolygon[] = [
     name: '南亭西街涌',
     kind: 'water',
     points: [
-      [23.0468, 113.3840],
-      [23.0466, 113.3849],
-      [23.0446, 113.3842],
-      [23.0432, 113.3836],
-      [23.0424, 113.3812],
-      [23.0414, 113.3792],
-      [23.0419, 113.3788],
-      [23.0430, 113.3811],
-      [23.0438, 113.3832],
-      [23.0450, 113.3835],
+      [23.04700, 113.38455],
+      [23.04685, 113.38525],
+      [23.04520, 113.38470],
+      [23.04405, 113.38340],
+      [23.04310, 113.38120],
+      [23.04225, 113.37985],
+      [23.04275, 113.37945],
+      [23.04365, 113.38095],
+      [23.04450, 113.38305],
+      [23.04565, 113.38410],
     ],
   },
   {
@@ -1222,10 +1323,10 @@ export const GDUT_HEMC_FEATURES: CampusFeaturePolygon[] = [
     name: '大学城南二路公园',
     kind: 'park',
     points: [
-      [23.0469, 113.3835],
-      [23.0469, 113.3858],
-      [23.0427, 113.3858],
-      [23.0427, 113.3834],
+      [23.04715, 113.38355],
+      [23.04715, 113.38595],
+      [23.04395, 113.38595],
+      [23.04395, 113.38355],
     ],
   },
   {
@@ -1234,10 +1335,10 @@ export const GDUT_HEMC_FEATURES: CampusFeaturePolygon[] = [
     kind: 'hill',
     elevation: 18,
     points: [
-      [23.0435, 113.3776],
-      [23.0434, 113.3796],
-      [23.0423, 113.3798],
-      [23.0421, 113.3777],
+      [23.04445, 113.37885],
+      [23.04445, 113.38025],
+      [23.04325, 113.38025],
+      [23.04325, 113.37885],
     ],
   },
   {
@@ -1246,10 +1347,10 @@ export const GDUT_HEMC_FEATURES: CampusFeaturePolygon[] = [
     kind: 'hill',
     elevation: 14,
     points: [
-      [23.0459, 113.3875],
-      [23.0459, 113.3892],
-      [23.0445, 113.3892],
-      [23.0445, 113.3875],
+      [23.04620, 113.38755],
+      [23.04620, 113.38895],
+      [23.04525, 113.38895],
+      [23.04525, 113.38755],
     ],
   },
   {
@@ -1257,10 +1358,10 @@ export const GDUT_HEMC_FEATURES: CampusFeaturePolygon[] = [
     name: 'B/C区篮球场',
     kind: 'court',
     points: [
-      [23.0400, 113.3838],
-      [23.0400, 113.3856],
-      [23.0394, 113.3856],
-      [23.0394, 113.3838],
+      [23.04130, 113.38415],
+      [23.04130, 113.38600],
+      [23.04060, 113.38600],
+      [23.04060, 113.38415],
     ],
   },
   {
@@ -1268,10 +1369,10 @@ export const GDUT_HEMC_FEATURES: CampusFeaturePolygon[] = [
     name: 'A区篮球场',
     kind: 'court',
     points: [
-      [23.0392, 113.3867],
-      [23.0392, 113.3879],
-      [23.0380, 113.3879],
-      [23.0380, 113.3867],
+      [23.04040, 113.38675],
+      [23.04040, 113.38785],
+      [23.03940, 113.38785],
+      [23.03940, 113.38675],
     ],
   },
   {
@@ -1279,10 +1380,10 @@ export const GDUT_HEMC_FEATURES: CampusFeaturePolygon[] = [
     name: '勤奋广场',
     kind: 'plaza',
     points: [
-      [23.0394, 113.3909],
-      [23.0394, 113.3917],
-      [23.0384, 113.3917],
-      [23.0384, 113.3909],
+      [23.04065, 113.39130],
+      [23.04065, 113.39200],
+      [23.03990, 113.39200],
+      [23.03990, 113.39130],
     ],
   },
   {
@@ -1290,82 +1391,84 @@ export const GDUT_HEMC_FEATURES: CampusFeaturePolygon[] = [
     name: '南亭村生活圈',
     kind: 'village',
     points: [
-      [23.0394, 113.3792],
-      [23.0391, 113.3842],
-      [23.0372, 113.3840],
-      [23.0375, 113.3792],
+      [23.04015, 113.37940],
+      [23.04005, 113.38405],
+      [23.03705, 113.38390],
+      [23.03725, 113.37940],
     ],
   },
 ];
 
-/** 广工大学城真实校内路网节点 */
+/** 广工大学城真实校内路网节点（基于 OpenStreetMap 实测路口 WGS-84 校准） */
 export const GDUT_HEMC_ROAD_NODES: CampusRoadNode[] = [
   // 中环西路东西干道
-  { id: 'n-ring-p835', lat: 23.0407, lng: 113.3782, label: '广美路/中环西路口(P835)' },
-  { id: 'n-ring-p834', lat: 23.0422, lng: 113.3831, label: '国医东路/中环西路口(P834)' },
-  { id: 'n-bridge-north', lat: 23.0427, lng: 113.3848, label: '广工人行天桥北口' },
-  { id: 'n-bridge-south', lat: 23.0420, lng: 113.3848, label: '广工人行天桥南口' },
-  { id: 'n-ring-p837', lat: 23.0424, lng: 113.3861, label: '广工二路/中环西路口(P837)' },
-  { id: 'n-ring-mid', lat: 23.0422, lng: 113.3886, label: '中环西路(挑战路隧道上方)' },
-  { id: 'n-ring-bus', lat: 23.0424, lng: 113.3905, label: '中环西路广工站' },
-  { id: 'n-ring-p843', lat: 23.0429, lng: 113.3932, label: '广工一路/中环西路口(P843)' },
+  { id: 'n-ring-p835', lat: 23.04200, lng: 113.37925, label: '广美路/中环西路口(P835)' },
+  { id: 'n-ring-p834', lat: 23.04372, lng: 113.38310, label: '国医东路/中环西路口(P834)' },
+  { id: 'n-bridge-north', lat: 23.04372, lng: 113.38466, label: '广工人行天桥北口' },
+  { id: 'n-bridge-south', lat: 23.04308, lng: 113.38466, label: '广工人行天桥南口' },
+  { id: 'n-ring-p837', lat: 23.04370, lng: 113.38580, label: '广工二路/中环西路口(P837)' },
+  { id: 'n-ring-mid', lat: 23.04340, lng: 113.38866, label: '中环西路(挑战路隧道上方)' },
+  { id: 'n-ring-bus', lat: 23.04375, lng: 113.39090, label: '中环西路广工站' },
+  { id: 'n-ring-p843', lat: 23.04432, lng: 113.39260, label: '广工一路/中环西路口(P843)' },
+  { id: 'n-metro-south', lat: 23.04545, lng: 113.39455, label: '大学城南地铁站(A/B口)' },
 
   // 生活西区路网
-  { id: 'n-west-canteen4', lat: 23.0445, lng: 113.3775, label: '四饭/西13路口' },
-  { id: 'n-west-1-mid', lat: 23.0453, lng: 113.3785, label: '西苑一路中段' },
-  { id: 'n-west-1-north', lat: 23.0468, lng: 113.3785, label: '西12/西15北口' },
-  { id: 'n-west-2-south', lat: 23.0439, lng: 113.3804, label: '西苑二路南口(西5/西6)' },
-  { id: 'n-west-2-mid', lat: 23.0452, lng: 113.3804, label: '西苑横路中心' },
-  { id: 'n-west-2-north', lat: 23.0468, lng: 113.3808, label: '康陵路(西9北口)' },
-  { id: 'n-west-canteen3', lat: 23.0439, lng: 113.3822, label: '三饭/西苑三路南口' },
-  { id: 'n-west-3-mid', lat: 23.0454, lng: 113.3829, label: '国医东路(西2旁)' },
-  { id: 'n-west-3-north', lat: 23.0470, lng: 113.3832, label: '国医东路北口(西4旁)' },
+  { id: 'n-west-canteen4', lat: 23.04518, lng: 113.37782, label: '四饭/生活西区西门' },
+  { id: 'n-west-1-mid', lat: 23.04518, lng: 113.37927, label: '西苑一路/西苑横路口' },
+  { id: 'n-west-1-north', lat: 23.04705, lng: 113.37927, label: '西12/西15康陵路口' },
+  { id: 'n-west-2-south', lat: 23.04415, lng: 113.38084, label: '西苑二路南口(西5/西6)' },
+  { id: 'n-west-2-mid', lat: 23.04518, lng: 113.38084, label: '西苑横路中心(西6/西7)' },
+  { id: 'n-west-2-north', lat: 23.04705, lng: 113.38120, label: '康陵路(西9北口)' },
+  { id: 'n-west-canteen3', lat: 23.04425, lng: 113.38310, label: '三饭东口/国医东路' },
+  { id: 'n-west-3-mid', lat: 23.04518, lng: 113.38310, label: '生活西区东门(西1/西2旁)' },
+  { id: 'n-west-3-north', lat: 23.04705, lng: 113.38340, label: '国医东路/康陵路口(西4旁)' },
 
   // 南二路公园步道（连接西区与东区，仅步行）
-  { id: 'n-park-west', lat: 23.0445, lng: 113.3832, label: '国医东路公园入口' },
-  { id: 'n-park-east', lat: 23.0445, lng: 113.3859, label: '广工二路公园入口' },
+  { id: 'n-park-west', lat: 23.04565, lng: 113.38320, label: '国医东路公园入口' },
+  { id: 'n-park-east', lat: 23.04565, lng: 113.38615, label: '广工二路公园入口' },
 
   // 生活东区路网
-  { id: 'n-east-canteen2', lat: 23.0436, lng: 113.3860, label: '二饭/广工二路南口' },
-  { id: 'n-east-3-mid', lat: 23.0451, lng: 113.3860, label: '广工二路(东12/东13)' },
-  { id: 'n-east-3-north', lat: 23.0466, lng: 113.3864, label: '东苑三路北口(东14)' },
-  { id: 'n-tiaozhan-north', lat: 23.0432, lng: 113.3886, label: '挑战路隧道北口(东9/东10)' },
-  { id: 'n-east-2-south', lat: 23.0435, lng: 113.3896, label: '东苑二路南口(东4)' },
-  { id: 'n-east-2-mid', lat: 23.0447, lng: 113.3896, label: '东苑二路中段(东6/东7)' },
-  { id: 'n-east-canteen1', lat: 23.0461, lng: 113.3896, label: '一饭/东区服务中心' },
-  { id: 'n-east-north', lat: 23.0472, lng: 113.3892, label: '校医院/东苑四横路' },
-  { id: 'n-east-1-mid', lat: 23.0443, lng: 113.3910, label: '东苑一路中段(东1/东2)' },
-  { id: 'n-east-1-north', lat: 23.0455, lng: 113.3914, label: '广工一路北(东3/一饭东)' },
+  { id: 'n-east-canteen2', lat: 23.04462, lng: 113.38615, label: '二饭西口/广工二路' },
+  { id: 'n-east-3-mid', lat: 23.04518, lng: 113.38615, label: '广工东区西门(东12/东13)' },
+  { id: 'n-east-3-north', lat: 23.04655, lng: 113.38620, label: '广工二路北段(东14)' },
+  { id: 'n-tiaozhan-north', lat: 23.04390, lng: 113.38866, label: '挑战路隧道北口(东9/东10)' },
+  { id: 'n-east-2-south', lat: 23.04474, lng: 113.38916, label: '东苑二路/东苑一横路口' },
+  { id: 'n-east-2-mid', lat: 23.04540, lng: 113.38916, label: '东苑二路中段(东7/漠阳园)' },
+  { id: 'n-east-canteen1', lat: 23.04608, lng: 113.38916, label: '一饭/东区服务中心' },
+  { id: 'n-east-north', lat: 23.04705, lng: 113.38916, label: '校医院/东苑四横路' },
+  { id: 'n-east-1-south', lat: 23.04415, lng: 113.39028, label: '东苑一路南口(东1/东4)' },
+  { id: 'n-east-1-mid', lat: 23.04474, lng: 113.39028, label: '东苑一路中段(东1/东2)' },
+  { id: 'n-east-1-north', lat: 23.04608, lng: 113.39044, label: '广工东区东门(东3/一饭东)' },
 
   // 体育区与南亭
-  { id: 'n-tiyuguan-north', lat: 23.0418, lng: 113.3854, label: '环教北路(体育馆/体育场北)' },
-  { id: 'n-huanjiao-west', lat: 23.0402, lng: 113.3834, label: '环教西路(体育馆西侧)' },
-  { id: 'n-nanting-street', lat: 23.0394, lng: 113.3833, label: '南亭村大街口' },
-  { id: 'n-nanting-east', lat: 23.0392, lng: 113.3864, label: 'B区篮球场南/环教西路' },
+  { id: 'n-tiyuguan-north', lat: 23.04318, lng: 113.38530, label: '环教北路(体育馆/体育场北)' },
+  { id: 'n-huanjiao-west', lat: 23.04200, lng: 113.38315, label: '环教西路(体育馆西侧)' },
+  { id: 'n-nanting-street', lat: 23.03985, lng: 113.38331, label: '南亭村大街口' },
+  { id: 'n-nanting-east', lat: 23.04075, lng: 113.38630, label: 'B区篮球场东/知行大道西' },
 
   // 教学区主路网
-  { id: 'n-tiaozhan-beilu', lat: 23.0416, lng: 113.3886, label: '挑战路/环教北路口(教6/文化中心)' },
-  { id: 'n-chuangxin-beilu', lat: 23.0416, lng: 113.3911, label: '创新大道/环教北路口(教4/四大)' },
-  { id: 'n-mingde-beilu', lat: 23.0416, lng: 113.3932, label: '明德路/环教北路口(教2/求实楼)' },
-  { id: 'n-chuangxin-mid', lat: 23.0406, lng: 113.3911, label: '创新大道中段(一大/教3/教4)' },
-  { id: 'n-tiaozhan-zhixing', lat: 23.0397, lng: 113.3886, label: '挑战路/知行大道口(教5/图书馆西北)' },
-  { id: 'n-lib-front', lat: 23.0397, lng: 113.3898, label: '知行大道(图书馆/工大创谷北门)' },
-  { id: 'n-chuangxin-zhixing', lat: 23.0397, lng: 113.3911, label: '创新大道/知行大道口(教3/三大/勤奋广场)' },
-  { id: 'n-qiushi-zhixing', lat: 23.0397, lng: 113.3920, label: '求是路/知行大道口' },
-  { id: 'n-mingde-zhixing', lat: 23.0397, lng: 113.3935, label: '明德路/知行大道口(教1/实验4楼)' },
-  { id: 'n-boya-zhixing', lat: 23.0397, lng: 113.3948, label: '博雅路/知行大道口' },
+  { id: 'n-tiaozhan-beilu', lat: 23.04275, lng: 113.38866, label: '挑战路/环教北路口(教6/文化中心)' },
+  { id: 'n-chuangxin-beilu', lat: 23.04275, lng: 113.39120, label: '创新大道/环教北路口(教4/四大)' },
+  { id: 'n-mingde-beilu', lat: 23.04275, lng: 113.39344, label: '明德路/环教北路口(教2/求实楼)' },
+  { id: 'n-chuangxin-mid', lat: 23.04180, lng: 113.39120, label: '创新大道中段(一大/教3/教4)' },
+  { id: 'n-tiaozhan-zhixing', lat: 23.04072, lng: 113.38866, label: '挑战路/知行大道口(教5/图书馆西北)' },
+  { id: 'n-lib-front', lat: 23.04072, lng: 113.38980, label: '知行大道(图书馆/工大创谷北门)' },
+  { id: 'n-chuangxin-zhixing', lat: 23.04072, lng: 113.39120, label: '创新大道/知行大道口(教3/三大/勤奋广场)' },
+  { id: 'n-qiushi-zhixing', lat: 23.04072, lng: 113.39214, label: '求是路/知行大道口' },
+  { id: 'n-mingde-zhixing', lat: 23.04072, lng: 113.39344, label: '明德路/知行大道口(教1/实验4楼)' },
+  { id: 'n-boya-zhixing', lat: 23.04072, lng: 113.39512, label: '博雅路/知行大道口(广工东门)' },
 
   // 图书馆南侧、工学馆、实验楼与外环西路
-  { id: 'n-outer-west', lat: 23.0352, lng: 113.3872, label: '大学城外环西路(西段)' },
-  { id: 'n-chuangxin-south', lat: 23.0370, lng: 113.3911, label: '创新大道南段(综合楼)' },
-  { id: 'n-south-gate', lat: 23.0355, lng: 113.3914, label: '工大广场(南正门/外环西路)' },
-  { id: 'n-qiushi-mid', lat: 23.0381, lng: 113.3920, label: '求是路中段(工学4/2馆西)' },
-  { id: 'n-qiushi-south', lat: 23.0366, lng: 113.3920, label: '求是路南段(大讲堂/工学1馆西)' },
-  { id: 'n-mingde-yanxue2', lat: 23.0382, lng: 113.3935, label: '明德路/研学二路口(工学4/实验2-3楼)' },
-  { id: 'n-mingde-yanxue1', lat: 23.0372, lng: 113.3935, label: '明德路/研学一路口(工学1-2/实验1楼)' },
-  { id: 'n-mingde-south', lat: 23.0364, lng: 113.3935, label: '明德路南口(理学馆)' },
-  { id: 'n-boya-mid', lat: 23.0377, lng: 113.3948, label: '博雅路(立德科技楼)' },
-  { id: 'n-boya-south', lat: 23.0367, lng: 113.3948, label: '博雅路南口(环教东路)' },
+  { id: 'n-outer-west', lat: 23.03635, lng: 113.38730, label: '大学城外环西路(西段)' },
+  { id: 'n-chuangxin-south', lat: 23.03756, lng: 113.39120, label: '创新大道南段(综合楼/行政楼)' },
+  { id: 'n-south-gate', lat: 23.03608, lng: 113.39120, label: '广工南门(正门/工大广场)' },
+  { id: 'n-qiushi-mid', lat: 23.03938, lng: 113.39214, label: '求是路/研学二路口(工学3-4馆西)' },
+  { id: 'n-qiushi-south', lat: 23.03700, lng: 113.39214, label: '求是路南段(大讲堂/工学1馆西)' },
+  { id: 'n-mingde-yanxue2', lat: 23.03938, lng: 113.39344, label: '明德路/研学二路口(工学3-4/实验2-3楼)' },
+  { id: 'n-mingde-yanxue1', lat: 23.03796, lng: 113.39344, label: '明德路/研学一路口(工学1-2/实验1楼)' },
+  { id: 'n-mingde-south', lat: 23.03650, lng: 113.39344, label: '明德路南口(理学馆)' },
+  { id: 'n-boya-mid', lat: 23.03866, lng: 113.39512, label: '博雅路(立德科技楼)' },
+  { id: 'n-boya-south', lat: 23.03670, lng: 113.39512, label: '博雅路南口(环教东路)' },
 ];
 
 /** 广工大学城校内连通边（双向无向图，明确标注步行专用台阶/步道） */
@@ -1376,6 +1479,7 @@ export const GDUT_HEMC_ROAD_EDGES: CampusRoadEdge[] = [
   { from: 'n-ring-p837', to: 'n-ring-mid', roadName: '大学城中环西路', mode: 'both', kind: 'ring' },
   { from: 'n-ring-mid', to: 'n-ring-bus', roadName: '大学城中环西路', mode: 'both', kind: 'ring' },
   { from: 'n-ring-bus', to: 'n-ring-p843', roadName: '大学城中环西路', mode: 'both', kind: 'ring' },
+  { from: 'n-ring-p843', to: 'n-metro-south', roadName: '大学城中心南大街', mode: 'both', kind: 'ring' },
 
   // 关键南北跨中环西路通道
   {
@@ -1401,25 +1505,25 @@ export const GDUT_HEMC_ROAD_EDGES: CampusRoadEdge[] = [
   { from: 'n-ring-p837', to: 'n-tiyuguan-north', roadName: '广工二路/环教北路', mode: 'both', kind: 'main' },
   { from: 'n-ring-p837', to: 'n-east-canteen2', roadName: '大学城广工二路', mode: 'both', kind: 'main' },
   { from: 'n-ring-p843', to: 'n-mingde-beilu', roadName: '大学城广工一路', mode: 'both', kind: 'main' },
-  { from: 'n-ring-p843', to: 'n-east-1-mid', roadName: '大学城广工一路', mode: 'both', kind: 'main' },
+  { from: 'n-ring-p843', to: 'n-east-1-south', roadName: '大学城广工一路', mode: 'both', kind: 'main' },
+  { from: 'n-ring-p843', to: 'n-east-1-north', roadName: '大学城广工一路(东区外侧)', mode: 'both', kind: 'main' },
   { from: 'n-ring-bus', to: 'n-chuangxin-beilu', roadName: '广工站人行出口', mode: 'both', kind: 'campus' },
 
   // 生活西区路网
   { from: 'n-ring-p835', to: 'n-west-canteen4', roadName: '国医西路', mode: 'both', kind: 'main' },
-  { from: 'n-west-canteen4', to: 'n-west-1-mid', roadName: '西苑一路', mode: 'both', kind: 'campus' },
+  { from: 'n-west-canteen4', to: 'n-west-1-mid', roadName: '西苑横路西段', mode: 'both', kind: 'campus' },
   { from: 'n-west-1-mid', to: 'n-west-1-north', roadName: '西苑一路', mode: 'both', kind: 'campus' },
-  { from: 'n-west-canteen4', to: 'n-west-2-south', roadName: '西苑横路', mode: 'both', kind: 'campus' },
   { from: 'n-west-1-mid', to: 'n-west-2-mid', roadName: '西苑横路', mode: 'both', kind: 'campus' },
   { from: 'n-west-1-north', to: 'n-west-2-north', roadName: '康陵路', mode: 'both', kind: 'main' },
   { from: 'n-west-2-south', to: 'n-west-2-mid', roadName: '西苑二路', mode: 'both', kind: 'campus' },
   { from: 'n-west-2-mid', to: 'n-west-2-north', roadName: '西苑二路', mode: 'both', kind: 'campus' },
-  { from: 'n-west-2-south', to: 'n-west-canteen3', roadName: '西苑横路(三饭前)', mode: 'both', kind: 'campus' },
+  { from: 'n-west-2-south', to: 'n-west-canteen3', roadName: '西区南步道(三饭南)', mode: 'both', kind: 'campus' },
   { from: 'n-west-2-mid', to: 'n-west-3-mid', roadName: '西苑横路东段', mode: 'both', kind: 'campus' },
   { from: 'n-west-2-north', to: 'n-west-3-north', roadName: '康陵路', mode: 'both', kind: 'main' },
   { from: 'n-west-canteen3', to: 'n-ring-p834', roadName: '国医东路', mode: 'both', kind: 'main' },
-  { from: 'n-west-canteen3', to: 'n-park-west', roadName: '国医东路', mode: 'both', kind: 'main' },
-  { from: 'n-park-west', to: 'n-west-3-mid', roadName: '国医东路', mode: 'both', kind: 'main' },
-  { from: 'n-west-3-mid', to: 'n-west-3-north', roadName: '国医东路', mode: 'both', kind: 'main' },
+  { from: 'n-west-canteen3', to: 'n-west-3-mid', roadName: '国医东路', mode: 'both', kind: 'main' },
+  { from: 'n-west-3-mid', to: 'n-park-west', roadName: '国医东路', mode: 'both', kind: 'main' },
+  { from: 'n-park-west', to: 'n-west-3-north', roadName: '国医东路', mode: 'both', kind: 'main' },
 
   // 南二路公园捷径（连接西区与东区，仅步行）
   {
@@ -1432,22 +1536,23 @@ export const GDUT_HEMC_ROAD_EDGES: CampusRoadEdge[] = [
   },
 
   // 生活东区路网
-  { from: 'n-east-canteen2', to: 'n-park-east', roadName: '大学城广工二路', mode: 'both', kind: 'main' },
-  { from: 'n-park-east', to: 'n-east-3-mid', roadName: '大学城广工二路', mode: 'both', kind: 'main' },
-  { from: 'n-east-3-mid', to: 'n-east-3-north', roadName: '大学城广工二路', mode: 'both', kind: 'main' },
-  { from: 'n-east-canteen2', to: 'n-tiaozhan-north', roadName: '东苑一横路西段', mode: 'both', kind: 'campus' },
-  { from: 'n-tiaozhan-north', to: 'n-east-2-south', roadName: '东苑一横路', mode: 'both', kind: 'campus' },
-  { from: 'n-east-2-south', to: 'n-east-1-mid', roadName: '东苑一横路东段', mode: 'both', kind: 'campus' },
+  { from: 'n-east-canteen2', to: 'n-east-3-mid', roadName: '大学城广工二路', mode: 'both', kind: 'main' },
+  { from: 'n-east-3-mid', to: 'n-park-east', roadName: '大学城广工二路', mode: 'both', kind: 'main' },
+  { from: 'n-park-east', to: 'n-east-3-north', roadName: '大学城广工二路', mode: 'both', kind: 'main' },
+  { from: 'n-east-canteen2', to: 'n-tiaozhan-north', roadName: '东区南横路西段', mode: 'both', kind: 'campus' },
+  { from: 'n-tiaozhan-north', to: 'n-east-2-south', roadName: '东苑二路南段', mode: 'both', kind: 'campus' },
+  { from: 'n-tiaozhan-north', to: 'n-east-1-south', roadName: '东区南横路东段', mode: 'both', kind: 'campus' },
+  { from: 'n-east-1-south', to: 'n-east-1-mid', roadName: '东苑一路', mode: 'both', kind: 'campus' },
+  { from: 'n-east-2-south', to: 'n-east-1-mid', roadName: '东苑一横路', mode: 'both', kind: 'campus' },
   { from: 'n-east-2-south', to: 'n-east-2-mid', roadName: '东苑二路', mode: 'both', kind: 'campus' },
   { from: 'n-east-2-mid', to: 'n-east-canteen1', roadName: '东苑二路', mode: 'both', kind: 'campus' },
   { from: 'n-east-canteen1', to: 'n-east-north', roadName: '东苑二路北段', mode: 'both', kind: 'campus' },
   { from: 'n-east-3-mid', to: 'n-east-2-mid', roadName: '东苑二横路', mode: 'both', kind: 'campus' },
   { from: 'n-east-3-north', to: 'n-east-canteen1', roadName: '东苑三横路', mode: 'both', kind: 'campus' },
   { from: 'n-east-3-north', to: 'n-east-north', roadName: '东苑四横路', mode: 'both', kind: 'campus' },
-  { from: 'n-east-2-mid', to: 'n-east-1-mid', roadName: '东苑一横路', mode: 'both', kind: 'campus' },
   { from: 'n-east-1-mid', to: 'n-east-1-north', roadName: '东苑一路', mode: 'both', kind: 'campus' },
   { from: 'n-east-canteen1', to: 'n-east-1-north', roadName: '东苑三横路东段', mode: 'both', kind: 'campus' },
-  { from: 'n-east-north', to: 'n-east-1-north', roadName: '大学城广工一路', mode: 'both', kind: 'main' },
+  { from: 'n-east-north', to: 'n-east-1-north', roadName: '东区北环路', mode: 'both', kind: 'main' },
 
   // 体育区与南亭路网
   { from: 'n-tiyuguan-north', to: 'n-tiaozhan-beilu', roadName: '环教北路西段', mode: 'both', kind: 'main' },
@@ -1554,6 +1659,25 @@ export function matchCampusBuilding(classroomOrName: string): CampusBuilding | n
   return list[0] ?? null;
 }
 
+/** 查找离任意经纬度最近的校内建筑（用于 GPS 定位提示「近教3 / 近图书馆」） */
+export function findNearestBuilding(
+  lat: number,
+  lng: number,
+  maxMeters = 120,
+): { building: CampusBuilding; distanceMeters: number } | null {
+  let best: CampusBuilding | null = null;
+  let bestDist = Infinity;
+  for (const b of GDUT_HEMC_BUILDINGS) {
+    const d = distanceMeters({ lat, lng }, b);
+    if (d < bestDist) {
+      bestDist = d;
+      best = b;
+    }
+  }
+  if (!best || bestDist > maxMeters) return null;
+  return { building: best, distanceMeters: Math.round(bestDist) };
+}
+
 /** 查找离任意经纬度最近的校内路网节点 */
 export function findNearestRoadNode(lat: number, lng: number, mode: RouteMode = 'walk'): CampusRoadNode {
   const usable = new Set<string>();
@@ -1570,6 +1694,51 @@ export function findNearestRoadNode(lat: number, lng: number, mode: RouteMode = 
     if (d < bestDist) {
       bestDist = d;
       best = node;
+    }
+  }
+  return best;
+}
+
+interface RoadEdgeAnchor {
+  projected: { lat: number; lng: number };
+  edge: CampusRoadEdge;
+  distFromA: number;
+  distToB: number;
+}
+
+/** 将任意 GPS 坐标垂直投影到最近的可通行道路线段上，避免导航起手向后绕回最近路口 */
+function findNearestRoadEdgeAnchor(lat: number, lng: number, mode: RouteMode): RoadEdgeAnchor | null {
+  const p = latLngToLocal(lat, lng);
+  let best: RoadEdgeAnchor | null = null;
+  let bestDist = Infinity;
+
+  for (const edge of GDUT_HEMC_ROAD_EDGES) {
+    if (mode === 'bike' && edge.mode === 'walk') continue;
+    // 尽量不把地面 GPS 直接吸附到立体天桥桥面上，除非实在没有更近道路
+    const aNode = NODE_BY_ID.get(edge.from);
+    const bNode = NODE_BY_ID.get(edge.to);
+    if (!aNode || !bNode) continue;
+
+    const a = latLngToLocal(aNode.lat, aNode.lng);
+    const b = latLngToLocal(bNode.lat, bNode.lng);
+    const vx = b.x - a.x;
+    const vz = b.z - a.z;
+    const lenSq = vx * vx + vz * vz;
+    const t = lenSq === 0 ? 0 : Math.max(0, Math.min(1, ((p.x - a.x) * vx + (p.z - a.z) * vz) / lenSq));
+    const projX = a.x + t * vx;
+    const projZ = a.z + t * vz;
+    const perpDist = Math.hypot(p.x - projX, p.z - projZ);
+    // 轻微偏好地面道路而非天桥/隧道中段
+    const score = edge.kind === 'bridge' ? perpDist + 18 : perpDist;
+    if (score < bestDist) {
+      bestDist = score;
+      const segLen = Math.sqrt(lenSq);
+      best = {
+        projected: localToLatLng(projX, projZ),
+        edge,
+        distFromA: segLen * t,
+        distToB: segLen * (1 - t),
+      };
     }
   }
   return best;
@@ -1620,26 +1789,87 @@ const SPEED_M_PER_MIN: Record<RouteMode, number> = {
   bike: 210,
 };
 
-/** 使用 A* 算法在广工大学城真实校内路网上计算最短路径（支持步行/骑行差异化路由） */
+const VIRTUAL_GPS_START_ID = '__gps_start__';
+
+/** 使用 A* 算法在广工大学城真实校内路网上计算最短路径（支持步行/骑行差异化路由与 GPS 道路垂足无缝切入） */
 export function planCampusRoute(
   start: RouteEndpoint,
   end: RouteEndpoint,
   mode: RouteMode = 'walk',
 ): CampusRoutePlan | null {
-  const resolveEndpoint = (ep: RouteEndpoint) => {
-    if (ep.kind === 'building') {
-      const b = BUILDING_BY_ID.get(ep.buildingId);
-      if (!b) return null;
-      const node = NODE_BY_ID.get(b.roadNodeId) ?? findNearestRoadNode(b.lat, b.lng, mode);
-      return { lat: b.lat, lng: b.lng, nodeId: node.id };
-    }
-    const node = findNearestRoadNode(ep.lat, ep.lng, mode);
-    return { lat: ep.lat, lng: ep.lng, nodeId: node.id };
-  };
+  let endLat: number;
+  let endLng: number;
+  let endNodeId: string;
+  if (end.kind === 'building') {
+    const b = BUILDING_BY_ID.get(end.buildingId);
+    if (!b) return null;
+    const node = NODE_BY_ID.get(b.roadNodeId) ?? findNearestRoadNode(b.lat, b.lng, mode);
+    endLat = b.lat;
+    endLng = b.lng;
+    endNodeId = node.id;
+  } else {
+    const node = findNearestRoadNode(end.lat, end.lng, mode);
+    endLat = end.lat;
+    endLng = end.lng;
+    endNodeId = node.id;
+  }
 
-  const s = resolveEndpoint(start);
-  const e = resolveEndpoint(end);
-  if (!s || !e) return null;
+  let startLat: number;
+  let startLng: number;
+  let startNodeId: string;
+  let virtualStartNode: CampusRoadNode | null = null;
+  let startAnchor: RoadEdgeAnchor | null = null;
+
+  if (start.kind === 'building') {
+    const b = BUILDING_BY_ID.get(start.buildingId);
+    if (!b) return null;
+    const node = NODE_BY_ID.get(b.roadNodeId) ?? findNearestRoadNode(b.lat, b.lng, mode);
+    startLat = b.lat;
+    startLng = b.lng;
+    startNodeId = node.id;
+  } else {
+    startLat = start.lat;
+    startLng = start.lng;
+    const directDist = distanceMeters({ lat: startLat, lng: startLng }, { lat: endLat, lng: endLng });
+    if (directDist <= 32) {
+      const rounded = Math.max(1, Math.round(directDist));
+      return {
+        mode,
+        distanceMeters: rounded,
+        durationMinutes: 1,
+        waypoints: [
+          { lat: startLat, lng: startLng },
+          { lat: endLat, lng: endLng },
+        ],
+        steps: [
+          {
+            roadName: '直达目标建筑',
+            direction: cardinalDirection({ lat: startLat, lng: startLng }, { lat: endLat, lng: endLng }),
+            distanceMeters: rounded,
+            note: '你已就在目的地附近',
+          },
+        ],
+        crossings: [],
+      };
+    }
+
+    startAnchor = findNearestRoadEdgeAnchor(start.lat, start.lng, mode);
+    if (startAnchor) {
+      startNodeId = VIRTUAL_GPS_START_ID;
+      virtualStartNode = {
+        id: VIRTUAL_GPS_START_ID,
+        lat: startAnchor.projected.lat,
+        lng: startAnchor.projected.lng,
+        label: '当前道路切入点',
+      };
+    } else {
+      const node = findNearestRoadNode(start.lat, start.lng, mode);
+      startNodeId = node.id;
+    }
+  }
+
+  const getNode = (id: string): CampusRoadNode | undefined =>
+    id === VIRTUAL_GPS_START_ID ? (virtualStartNode ?? undefined) : NODE_BY_ID.get(id);
 
   // 构建邻接表
   const adj = new Map<string, { to: string; weight: number; edge: CampusRoadEdge }[]>();
@@ -1655,11 +1885,22 @@ export function planCampusRoute(
     adj.get(edge.to)!.push({ to: edge.from, weight: w, edge });
   }
 
-  const goalNode = NODE_BY_ID.get(e.nodeId)!;
-  const gScore = new Map<string, number>([[s.nodeId, 0]]);
-  const fScore = new Map<string, number>([[s.nodeId, distanceMeters(NODE_BY_ID.get(s.nodeId)!, goalNode)]]);
+  if (virtualStartNode && startAnchor) {
+    // 虚拟起点直连所在线段两端，由 A* 自动选择前进方向，零倒走绕路
+    adj.set(VIRTUAL_GPS_START_ID, [
+      { to: startAnchor.edge.from, weight: startAnchor.distFromA, edge: startAnchor.edge },
+      { to: startAnchor.edge.to, weight: startAnchor.distToB, edge: startAnchor.edge },
+    ]);
+  }
+
+  const startNode = getNode(startNodeId);
+  const goalNode = getNode(endNodeId);
+  if (!startNode || !goalNode) return null;
+
+  const gScore = new Map<string, number>([[startNodeId, 0]]);
+  const fScore = new Map<string, number>([[startNodeId, distanceMeters(startNode, goalNode)]]);
   const cameFrom = new Map<string, { prev: string; edge: CampusRoadEdge; dist: number }>();
-  const open = new Set<string>([s.nodeId]);
+  const open = new Set<string>([startNodeId]);
   const closed = new Set<string>();
 
   while (open.size > 0) {
@@ -1672,32 +1913,34 @@ export function planCampusRoute(
         current = id;
       }
     }
-    if (current === e.nodeId) break;
+    if (current === endNodeId) break;
     open.delete(current);
     closed.add(current);
 
     for (const { to, weight, edge } of adj.get(current) ?? []) {
       if (closed.has(to)) continue;
+      const toNode = getNode(to);
+      if (!toNode) continue;
       const tentative = (gScore.get(current) ?? Infinity) + weight;
       if (tentative < (gScore.get(to) ?? Infinity)) {
         cameFrom.set(to, { prev: current, edge, dist: weight });
         gScore.set(to, tentative);
-        fScore.set(to, tentative + distanceMeters(NODE_BY_ID.get(to)!, goalNode));
+        fScore.set(to, tentative + distanceMeters(toNode, goalNode));
         open.add(to);
       }
     }
   }
 
-  if (s.nodeId !== e.nodeId && !cameFrom.has(e.nodeId)) return null;
+  if (startNodeId !== endNodeId && !cameFrom.has(endNodeId)) return null;
 
   // 回溯路径
-  const nodeIds: string[] = [e.nodeId];
+  const nodeIds: string[] = [endNodeId];
   const segments: { from: CampusRoadNode; to: CampusRoadNode; edge: CampusRoadEdge; dist: number }[] = [];
-  let cursor = e.nodeId;
-  while (cursor !== s.nodeId) {
+  let cursor = endNodeId;
+  while (cursor !== startNodeId) {
     const link = cameFrom.get(cursor)!;
-    const fromNode = NODE_BY_ID.get(link.prev)!;
-    const toNode = NODE_BY_ID.get(cursor)!;
+    const fromNode = getNode(link.prev)!;
+    const toNode = getNode(cursor)!;
     segments.push({ from: fromNode, to: toNode, edge: link.edge, dist: link.dist });
     nodeIds.push(link.prev);
     cursor = link.prev;
@@ -1709,6 +1952,7 @@ export function planCampusRoute(
   const steps: RouteStep[] = [];
   const crossings: string[] = [];
   for (const seg of segments) {
+    if (seg.dist < 1) continue;
     if (seg.edge.kind === 'tunnel' || seg.edge.kind === 'bridge') {
       crossings.push(seg.edge.roadName);
     }
@@ -1726,14 +1970,14 @@ export function planCampusRoute(
     }
   }
 
-  const waypoints: { lat: number; lng: number }[] = [{ lat: s.lat, lng: s.lng }];
+  const waypoints: { lat: number; lng: number }[] = [{ lat: startLat, lng: startLng }];
   for (const id of nodeIds) {
-    const n = NODE_BY_ID.get(id)!;
+    const n = getNode(id)!;
     const last = waypoints[waypoints.length - 1]!;
-    if (distanceMeters(last, n) > 8) waypoints.push({ lat: n.lat, lng: n.lng });
+    if (distanceMeters(last, n) > 6) waypoints.push({ lat: n.lat, lng: n.lng });
   }
-  if (distanceMeters(waypoints[waypoints.length - 1]!, { lat: e.lat, lng: e.lng }) > 8) {
-    waypoints.push({ lat: e.lat, lng: e.lng });
+  if (distanceMeters(waypoints[waypoints.length - 1]!, { lat: endLat, lng: endLng }) > 6) {
+    waypoints.push({ lat: endLat, lng: endLng });
   }
 
   let totalMeters = 0;

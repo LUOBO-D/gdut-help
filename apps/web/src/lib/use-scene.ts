@@ -15,7 +15,8 @@ export function useScene(): Scene {
   // 登录页没有天气查询，用上次缓存的天气，保证登录前后场景一致
   const campusId = useAuth((s) => s.user?.campusId ?? null);
   const cached = useQueryClient().getQueryData<WeatherReport>(keys.weather(campusId));
-  const scene = override ?? weather?.now.scene ?? cached?.now.scene ?? timeScene;
+  const rawScene = override ?? weather?.now.scene ?? cached?.now.scene ?? timeScene;
+  const scene: Scene = rawScene in SCENE_STYLES ? rawScene : timeScene;
 
   useEffect(() => {
     document.documentElement.dataset.scene = scene;

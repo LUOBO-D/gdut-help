@@ -2,6 +2,7 @@ import {
   BUILDING_CATEGORY_LABELS,
   distanceMeters,
   distanceToRouteMeters,
+  findNearestBuilding,
   GDUT_HEMC_BUILDINGS,
   getCampusBuilding,
   isInsideCampusBounds,
@@ -33,7 +34,14 @@ import {
   XIcon,
 } from '../../components/icons';
 import { useAuth } from '../../lib/auth-store';
-import { getCurrentLocation, LocationError, watchLocation, type GeoFix } from '../../lib/location';
+import {
+  getCachedLocation,
+  getCurrentLocation,
+  hasLocationPermission,
+  LocationError,
+  watchLocation,
+  type GeoFix,
+} from '../../lib/location';
 import { hapticLight } from '../../lib/native-ux';
 import { pushSheet } from '../../lib/sheet-stack';
 import { toast } from '../../lib/toast-store';
@@ -165,12 +173,13 @@ export function MapPage() {
   const [startSearch, setStartSearch] = useState('');
   const [stepsExpanded, setStepsExpanded] = useState(false);
 
-  // GPS 实时定位
-  const [userFix, setUserFix] = useState<GeoFix | null>(null);
+  // GPS 实时定位（启动时优先复用近期缓存，并在已授权前提下后台静默预热，实现导航秒开）
+  const [userFix, setUserFix] = useState<GeoFix | null>(() => getCachedLocation(30_000));
   const [locating, setLocating] = useState(false);
   const [tracking, setTracking] = useState(false);
   const stopWatchRef = useRef<(() => void) | null>(null);
   const lastRerouteAtRef = useRef(0);
+  const manualStartRef = useRef(false);
 
   // 相机控制
   const controlApiRef = useRef<CameraControlApi | null>(null);
@@ -182,6 +191,10 @@ export function MapPage() {
   const userInsideCampus = useMemo(
     () => (userFix ? isInsideCampusBounds(userFix.lat, userFix.lng) : false),
     [userFix],
+  );
+  const nearestToUser = useMemo(
+    () => (userFix && userInsideCampus ? findNearestBuilding(userFix.lat, userFix.lng, 90) : null),
+    [userFix, userInsideCampus],
   );
 
   const flyTo = useCallback((lat: number, lng: number, distance?: number) => {
@@ -217,6 +230,29 @@ export function MapPage() {
     }
     setSearchParams({}, { replace: true });
   }, [initialLink.hadParam, initialLink.unmatchedQuery, setSearchParams]);
+
+  // 进入地图页时若已授予位置权限，后台静默预热定位（不弹窗、不抢镜头），点导航时 0 秒出位置
+  useEffect(() => {
+    let cancelled = false;
+    void hasLocationPermission()
+      .then((allowed) => {
+        if (!allowed || cancelled) return;
+        return getCurrentLocation({
+          silent: true,
+          onFastFix: (fix) => {
+            if (!cancelled) setUserFix(fix);
+          },
+        }).then((fix) => {
+          if (!cancelled) setUserFix(fix);
+        });
+      })
+      .catch(() => {
+        // 静默预热失败不打扰用户，等用户主动点击定位时再提示
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   // 组件卸载时停止 GPS 监听
   useEffect(() => {
@@ -262,6 +298,7 @@ export function MapPage() {
       setSearchOpen(false);
       setQuery('');
       if (pickingStart) {
+        manualStartRef.current = true;
         setStartSpec({ kind: 'building', buildingId: b.id });
         setPickingStart(false);
         setStartSearch('');
@@ -284,8 +321,9 @@ export function MapPage() {
       setStepsExpanded(false);
       setPickingStart(false);
 
+      const useExistingManual = manualStartRef.current && startSpec.kind === 'building' && startSpec.buildingId !== target.id;
       let nextStart: StartSpec = startSpec;
-      if (userFix && userInsideCampus) {
+      if (!useExistingManual && userFix && userInsideCampus) {
         nextStart = { kind: 'gps' };
       } else if (startSpec.kind === 'building' && startSpec.buildingId === target.id) {
         nextStart = { kind: 'building', buildingId: target.id === 'library' ? 'xi6' : 'library' };
@@ -300,6 +338,28 @@ export function MapPage() {
           : { kind: 'building', buildingId: nextStart.kind === 'building' ? nextStart.buildingId : 'xi6' };
       const plan = planCampusRoute(ep, { kind: 'building', buildingId: target.id }, routeMode);
       if (plan) flyToRoute(plan);
+
+      // 若尚未拿到校内 GPS 且用户未手选起点，后台静默拉一次极速定位，锁到后立刻切换真实起点
+      if (!useExistingManual && (!userFix || !userInsideCampus)) {
+        void hasLocationPermission().then((allowed) => {
+          if (!allowed) return;
+          const applyAutoGps = (fix: GeoFix) => {
+            setUserFix(fix);
+            if (!manualStartRef.current && isInsideCampusBounds(fix.lat, fix.lng)) {
+              setStartSpec({ kind: 'gps' });
+              const livePlan = planCampusRoute(
+                { kind: 'coord', lat: fix.lat, lng: fix.lng },
+                { kind: 'building', buildingId: target.id },
+                routeMode,
+              );
+              if (livePlan) flyToRoute(livePlan);
+            }
+          };
+          void getCurrentLocation({ silent: true, onFastFix: applyAutoGps })
+            .then(applyAutoGps)
+            .catch(() => {});
+        });
+      }
     },
     [flyToRoute, routeMode, startSpec, userFix, userInsideCampus],
   );
@@ -307,13 +367,32 @@ export function MapPage() {
   const handleLocateOnce = async () => {
     hapticLight();
     setLocating(true);
+    let flewOnFastFix = false;
     try {
-      const fix = await getCurrentLocation();
+      const fix = await getCurrentLocation({
+        onFastFix: (fast) => {
+          setUserFix(fast);
+          if (isInsideCampusBounds(fast.lat, fast.lng)) {
+            flewOnFastFix = true;
+            setLocating(false);
+            flyTo(fast.lat, fast.lng, 420);
+            if (navActive) {
+              manualStartRef.current = false;
+              setStartSpec({ kind: 'gps' });
+            }
+          }
+        },
+      });
       setUserFix(fix);
       if (isInsideCampusBounds(fix.lat, fix.lng)) {
-        flyTo(fix.lat, fix.lng, 420);
-        toast.success(`已定位到校内位置（精度约 ${fix.accuracy}m）`);
-        if (navActive) setStartSpec({ kind: 'gps' });
+        if (!flewOnFastFix) flyTo(fix.lat, fix.lng, 400);
+        const near = findNearestBuilding(fix.lat, fix.lng, 90);
+        const nearText = near ? ` · 近${near.building.shortName}` : '';
+        toast.success(`已定位到校内位置${nearText}（精度 ±${fix.accuracy}m）`);
+        if (navActive) {
+          manualStartRef.current = false;
+          setStartSpec({ kind: 'gps' });
+        }
       } else {
         toast.info('当前不在广工大学城校区范围内，可在下方手动选择校内起点');
       }
@@ -334,43 +413,62 @@ export function MapPage() {
       return;
     }
     setLocating(true);
+    let centered = false;
+    let notifiedOutside = false;
+    let lastAccuracy = Infinity;
     try {
-      const firstFix = await getCurrentLocation();
-      setUserFix(firstFix);
-      const inside = isInsideCampusBounds(firstFix.lat, firstFix.lng);
-      if (inside) {
-        setStartSpec({ kind: 'gps' });
-        flyTo(firstFix.lat, firstFix.lng, 360);
-      } else {
-        toast.info('你当前不在大学城校区内，已为你保留校内手动起点进行路线预览');
-      }
+      // 直接启动高频实时监听（内置 0ms 缓存回放 + 0.3s 快速首帧），不再先干等 12s 冷启动
       const stop = await watchLocation(
         (fix) => {
           setUserFix(fix);
-          if (isInsideCampusBounds(fix.lat, fix.lng)) {
+          setLocating(false);
+          const inside = isInsideCampusBounds(fix.lat, fix.lng);
+          if (inside) {
+            manualStartRef.current = false;
             setStartSpec((prev) => (prev.kind === 'gps' ? prev : { kind: 'gps' }));
+            const upgradedToPrecise = lastAccuracy > 45 && fix.accuracy <= 25;
+            if (!centered || upgradedToPrecise) {
+              const firstLock = !centered;
+              centered = true;
+              flyTo(fix.lat, fix.lng, 360);
+              if (firstLock) {
+                const near = findNearestBuilding(fix.lat, fix.lng, 90);
+                toast.success(
+                  near
+                    ? `已开启实时跟走 · 近${near.building.shortName} (±${fix.accuracy}m)`
+                    : `已开启校内实时跟走导航 (±${fix.accuracy}m)`,
+                );
+              }
+            }
+            lastAccuracy = fix.accuracy;
+
+            // 仅在室外高精度锁星（<=35m）时做偏航重算提醒，避免室内粗略漂移误报
             const snap = navSnapshotRef.current;
-            if (snap.navActive && snap.activeRoute) {
+            if (snap.navActive && snap.activeRoute && fix.accuracy <= 35) {
               const offDist = distanceToRouteMeters(fix, snap.activeRoute.waypoints);
+              const threshold = Math.max(35, fix.accuracy * 1.2);
               const nowMs = Date.now();
-              if (offDist > 35 && nowMs - lastRerouteAtRef.current > 10_000) {
+              if (offDist > threshold && nowMs - lastRerouteAtRef.current > 12_000) {
                 lastRerouteAtRef.current = nowMs;
                 toast.info('检测到路线偏移，已按当前位置自动重算');
               }
             }
+          } else if (!notifiedOutside) {
+            notifiedOutside = true;
+            toast.info('你当前不在大学城校区内，已为你保留校内手动起点进行路线预览');
           }
         },
         (err) => {
+          setLocating(false);
           toast.error(err.message);
         },
       );
       stopWatchRef.current = stop;
       setTracking(true);
-      if (inside) toast.success('已开启校内实时跟走导航（偏航将自动重算）');
-    } catch (err) {
-      toast.error(err instanceof LocationError ? err.message : '开启实时定位失败');
-    } finally {
       setLocating(false);
+    } catch (err) {
+      setLocating(false);
+      toast.error(err instanceof LocationError ? err.message : '开启实时定位失败');
     }
   };
 
@@ -387,6 +485,7 @@ export function MapPage() {
       return;
     }
     hapticLight();
+    manualStartRef.current = true;
     const prevStart = startSpec.buildingId;
     setStartSpec({ kind: 'building', buildingId: endBuildingId });
     setEndBuildingId(prevStart);
@@ -398,9 +497,15 @@ export function MapPage() {
 
   const startLabel =
     startSpec.kind === 'gps'
-      ? userInsideCampus
-        ? '我的当前位置 (GPS)'
-        : '定位在校外，点此选校内起点'
+      ? !userFix
+        ? '正在锁定当前位置…'
+        : !userInsideCampus
+          ? '定位在校外，点此选校内起点'
+          : userFix.accuracy > 55
+            ? `我的位置（室内粗略 ±${userFix.accuracy}m · 点此校准）`
+            : nearestToUser
+              ? `我的位置 · 近${nearestToUser.building.shortName} (±${userFix.accuracy}m)`
+              : `我的当前位置 (GPS ±${userFix.accuracy}m)`
       : (getCampusBuilding(startSpec.buildingId)?.name ?? '选择起点');
 
   const panelSurface = lighting.isDark
@@ -737,6 +842,7 @@ export function MapPage() {
                         key={b.id}
                         type="button"
                         onClick={() => {
+                          manualStartRef.current = true;
                           setStartSpec({ kind: 'building', buildingId: b.id });
                           setPickingStart(false);
                           setStartSearch('');
@@ -790,13 +896,21 @@ export function MapPage() {
 
                 <Button
                   className="h-9 px-3.5 text-xs"
-                  loading={locating}
+                  loading={locating && !tracking}
                   onClick={() => void toggleLiveTracking()}
                 >
                   <NavigationIcon size={14} />
                   {tracking ? '停止跟走' : '实时跟走'}
                 </Button>
               </div>
+
+              {tracking && (!userFix || userFix.accuracy > 55) && (
+                <p className={`mt-1.5 text-[11px] ${mutedText}`}>
+                  {!userFix
+                    ? '正在快速锁定卫星信号，移至室外开阔处精度更高…'
+                    : `当前处于室内粗略定位（±${userFix.accuracy}m），可点上方「起点」手动校准为所在楼栋`}
+                </p>
+              )}
 
               {/* 关键通道提示（天桥 / 隧道） + 可展开分步文字指引 */}
               {activeRoute && (
@@ -894,6 +1008,7 @@ export function MapPage() {
                   variant="ghost"
                   className="h-10 px-3.5 text-sm"
                   onClick={() => {
+                    manualStartRef.current = true;
                     setStartSpec({ kind: 'building', buildingId: selectedBuilding.id });
                     toast.success(`已将「${selectedBuilding.shortName}」设为出发起点，再点目标楼栋即可规划路线`);
                     setSelectedId(null);

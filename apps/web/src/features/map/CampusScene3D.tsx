@@ -10,7 +10,7 @@ import {
   type CampusRoutePlan,
 } from '@gduthelp/shared';
 import { Canvas, useFrame, useThree } from '@react-three/fiber';
-import { useEffect, useMemo, useRef, type MutableRefObject } from 'react';
+import { useEffect, useMemo, useRef, useState, type MutableRefObject } from 'react';
 import * as THREE from 'three';
 import type { GeoFix } from '../../lib/location';
 import type { CampusLightingPalette } from './campus-lighting';
@@ -71,36 +71,36 @@ const BUILDING_LOCAL = new Map(GDUT_HEMC_BUILDINGS.map((b) => [b.id, latLngToLoc
 const BRIDGE_NORTH_LOCAL = ROAD_NODE_LOCAL.get('n-bridge-north')!;
 const BRIDGE_SOUTH_LOCAL = ROAD_NODE_LOCAL.get('n-bridge-south')!;
 
-/** 广工标志性绿化带/山坡/林荫道树冠点位（3 个 InstancedMesh 绘制，零 GPU 压力） */
+/** 广工标志性绿化带/山坡/林荫道树冠点位（严格对齐 OSM WGS-84，3 个 InstancedMesh 绘制） */
 const CAMPUS_TREE_CLUSTERS: { lat: number; lng: number; radius: number; count: number; baseY?: number }[] = [
   // 南二路公园 + 河涌两岸
-  { lat: 23.0451, lng: 113.3849, radius: 64, count: 28 },
-  { lat: 23.0437, lng: 113.3852, radius: 48, count: 18 },
+  { lat: 23.0460, lng: 113.3848, radius: 64, count: 28 },
+  { lat: 23.0445, lng: 113.3849, radius: 46, count: 18 },
   // 漠阳园（生活东区中部草坡）
-  { lat: 23.0452, lng: 113.3883, radius: 58, count: 28, baseY: 9.5 },
+  { lat: 23.0457, lng: 113.38825, radius: 52, count: 26, baseY: 9.5 },
   // 金银山（四饭/西17 南侧山丘）
-  { lat: 23.0428, lng: 113.3787, radius: 60, count: 28, baseY: 11.5 },
+  { lat: 23.04385, lng: 113.37955, radius: 52, count: 26, baseY: 11.5 },
   // 团结湖滨水景观带
-  { lat: 23.0384, lng: 113.3882, radius: 36, count: 14 },
-  { lat: 23.0372, lng: 113.3879, radius: 34, count: 12 },
+  { lat: 23.0389, lng: 113.3882, radius: 34, count: 14 },
+  { lat: 23.0375, lng: 113.3879, radius: 34, count: 12 },
   // 生活西区内部林荫道
-  { lat: 23.0458, lng: 113.3808, radius: 55, count: 16 },
-  // 中心体育场周边林荫
-  { lat: 23.0385, lng: 113.3847, radius: 58, count: 18 },
-  // 图书馆前知行大道绿化带
-  { lat: 23.0394, lng: 113.3911, radius: 28, count: 10 },
+  { lat: 23.0458, lng: 113.3808, radius: 52, count: 16 },
+  // 中心体育场南侧林荫
+  { lat: 23.0394, lng: 113.3852, radius: 52, count: 16 },
+  // 图书馆前知行大道/勤奋广场绿化带
+  { lat: 23.0403, lng: 113.3916, radius: 24, count: 10 },
 ];
 
 /** 沿广工校园主干道整齐栽种的岭南行道树（知行大道、创新大道、明德路、中环西路南侧） */
 const AVENUE_TREE_LINES: { from: [number, number]; to: [number, number]; step: number; offset: number }[] = [
   // 知行大道（教3/教5与图书馆之间）
-  { from: [23.0397, 113.3876], to: [23.0397, 113.3945], step: 44, offset: 11 },
+  { from: [23.04072, 113.3876], to: [23.04072, 113.3948], step: 44, offset: 11 },
   // 创新大道（图书馆东侧→工大广场）
-  { from: [23.0414, 113.3911], to: [23.0361, 113.3911], step: 48, offset: 11 },
+  { from: [23.0426, 113.39120], to: [23.0363, 113.39120], step: 48, offset: 11 },
   // 明德路（工学馆与实验楼之间）
-  { from: [23.0413, 113.3935], to: [23.0364, 113.3935], step: 48, offset: 10 },
+  { from: [23.0426, 113.39344], to: [23.0367, 113.39344], step: 48, offset: 10 },
   // 中环西路南侧绿化带
-  { from: [23.0418, 113.3834], to: [23.0422, 113.3938], step: 56, offset: 18 },
+  { from: [23.0433, 113.3834], to: [23.0439, 113.3932], step: 56, offset: 18 },
 ];
 
 const CAMPUS_TREE_POSITIONS: [number, number, number, number][] = (() => {
@@ -141,11 +141,11 @@ const CAMPUS_TREE_POSITIONS: [number, number, number, number][] = (() => {
 })();
 
 const ZONE_WATERMARKS = [
-  { id: 'wm-west', label: '生活西区', lat: 23.0458, lng: 113.3802 },
-  { id: 'wm-east', label: '生活东区', lat: 23.0451, lng: 113.3894 },
-  { id: 'wm-teach', label: '教学区 · 教1-6', lat: 23.0407, lng: 113.3908 },
-  { id: 'wm-lab', label: '工学馆 · 实验楼', lat: 23.0378, lng: 113.3935 },
-  { id: 'wm-ring', label: '大学城中环西路', lat: 23.0424, lng: 113.3878 },
+  { id: 'wm-west', label: '生活西区', lat: 23.0458, lng: 113.3806 },
+  { id: 'wm-east', label: '生活东区', lat: 23.0454, lng: 113.3890 },
+  { id: 'wm-teach', label: '教学区 · 教1-6', lat: 23.0418, lng: 113.3908 },
+  { id: 'wm-lab', label: '工学馆 · 实验楼', lat: 23.0388, lng: 113.3936 },
+  { id: 'wm-ring', label: '大学城中环西路', lat: 23.0436, lng: 113.3878 },
 ].map((w) => ({ ...w, local: latLngToLocal(w.lat, w.lng) }));
 
 const CLAMP_X: [number, number] = [-1150, 950];
@@ -1295,13 +1295,30 @@ function RouteOverlay3D({ route, lighting }: { route: CampusRoutePlan; lighting:
   );
 }
 
-/** 实时 GPS 蓝色脉冲定位点 + 精度圈 + 朝向扇形 */
+/** 实时 GPS 蓝色脉冲定位点 + 精度圈 + 朝向扇形（带丝滑位置与方向插值） */
 function UserLocationBeacon({ fix }: { fix: GeoFix }) {
+  const groupRef = useRef<THREE.Group>(null);
   const ringRef = useRef<THREE.Mesh>(null);
-  const pos = latLngToLocal(fix.lat, fix.lng);
+  const targetRef = useRef(latLngToLocal(fix.lat, fix.lng));
+  const initializedRef = useRef(false);
   const accRadius = clamp(fix.accuracy, 10, 65);
 
-  useFrame(({ clock }) => {
+  useEffect(() => {
+    targetRef.current = latLngToLocal(fix.lat, fix.lng);
+  }, [fix.lat, fix.lng]);
+
+  useFrame(({ clock }, delta) => {
+    if (groupRef.current) {
+      const t = targetRef.current;
+      if (!initializedRef.current) {
+        groupRef.current.position.set(t.x, 1.8, t.z);
+        initializedRef.current = true;
+      } else {
+        const k = 1 - Math.exp(-Math.min(delta, 0.05) * 10);
+        groupRef.current.position.x += (t.x - groupRef.current.position.x) * k;
+        groupRef.current.position.z += (t.z - groupRef.current.position.z) * k;
+      }
+    }
     if (!ringRef.current) return;
     const s = 1 + ((clock.getElapsedTime() * 0.7) % 1) * 1.4;
     ringRef.current.scale.set(s, s, 1);
@@ -1309,8 +1326,10 @@ function UserLocationBeacon({ fix }: { fix: GeoFix }) {
     mat.opacity = Math.max(0, 0.55 * (1 - ((clock.getElapsedTime() * 0.7) % 1)));
   });
 
+  const [initialPos] = useState(() => latLngToLocal(fix.lat, fix.lng));
+
   return (
-    <group position={[pos.x, 1.8, pos.z]}>
+    <group ref={groupRef} position={[initialPos.x, 1.8, initialPos.z]}>
       <mesh rotation={[-Math.PI / 2, 0, 0]}>
         <circleGeometry args={[accRadius, 32]} />
         <meshBasicMaterial color="#3b82f6" transparent opacity={0.18} />

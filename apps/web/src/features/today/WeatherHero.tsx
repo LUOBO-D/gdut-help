@@ -29,8 +29,8 @@ export function WeatherHero() {
 
   if (!w) {
     return (
-      <section className="mb-3 mt-3" aria-label="天气">
-        <GlassCard variant="thin" className="flex items-center justify-between gap-3 px-4 py-2.5">
+      <section aria-label="天气">
+        <GlassCard variant="thin" className="flex items-center justify-between gap-3 rounded-2xl! px-4 py-2.5">
           <div className="flex items-center gap-2.5 text-sm text-fg-muted">
             <span className="font-num text-xl font-light tabular-nums">--°</span>
             <span>{isPending ? '正在同步校区天气…' : isError ? '天气暂时获取不到' : ''}</span>
@@ -46,8 +46,8 @@ export function WeatherHero() {
   const hasHourly = hours.length > 0;
 
   return (
-    <section className="mb-3 mt-3" aria-label="校区天气">
-      <GlassCard variant="thin" className="overflow-hidden">
+    <section aria-label="校区天气">
+      <GlassCard variant="thin" className="overflow-hidden rounded-2xl!">
         <button
           type="button"
           onClick={() => hasHourly && setExpanded((v) => !v)}
@@ -56,29 +56,30 @@ export function WeatherHero() {
         >
           <div className="flex min-w-0 items-center gap-2.5">
             <span className="shrink-0">
-              <WeatherIcon scene={w.now.scene} size={24} />
+              <WeatherIcon scene={w.now.scene} size={22} />
             </span>
-            <span className="font-num text-2xl font-semibold leading-none tabular-nums" aria-label={`${w.now.temp} 度`}>
+            <span className="font-num text-xl font-semibold leading-none tabular-nums" aria-label={`${w.now.temp} 度`}>
               <RollingNumber value={w.now.temp} />°
             </span>
             <span className="truncate text-sm font-medium">{w.now.text}</span>
             {needUmbrella && (
-              <span className="shrink-0 rounded-full bg-accent/20 px-2 py-0.5 text-[11px] font-medium text-accent">
+              <span className="shrink-0 rounded-full bg-accent/18 px-2 py-0.5 text-[11px] font-medium text-accent">
                 记得带伞
               </span>
             )}
           </div>
 
           <div className="flex shrink-0 items-center gap-2 text-right">
-            <div>
-              <p className="text-xs font-medium leading-tight">{campus ? campus.name : w.location}</p>
-              <p className="mt-0.5 font-num text-[11px] leading-tight text-fg-muted tabular-nums">
-                {w.today.min}°/{w.today.max}°{w.today.pop !== null && w.today.pop > 0 ? ` · 降水 ${w.today.pop}%` : ''}
-              </p>
+            <div className="flex items-center gap-1.5 text-xs">
+              <span className="hidden text-fg-muted sm:inline">{campus ? campus.name : w.location}</span>
+              <span className="font-num text-fg-muted tabular-nums">
+                {w.today.min}°/{w.today.max}°
+                {w.today.pop !== null && w.today.pop >= 20 ? ` · ${w.today.pop}%` : ''}
+              </span>
             </div>
             {hasHourly && (
               <ChevronRightIcon
-                size={15}
+                size={14}
                 className={`text-fg-muted transition-transform duration-200 ${expanded ? 'rotate-90' : ''}`}
               />
             )}

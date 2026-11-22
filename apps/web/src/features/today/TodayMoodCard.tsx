@@ -4,6 +4,7 @@ import { useState, type FormEvent } from 'react';
 import { Button } from '../../components/Button';
 import { GlassCard } from '../../components/GlassCard';
 import { Sheet } from '../../components/Sheet';
+import { ChevronRightIcon } from '../../components/icons';
 import { ApiError } from '../../lib/api';
 import { useTodayMood } from '../../lib/queries';
 import { toast } from '../../lib/toast-store';
@@ -11,7 +12,7 @@ import { pressable, spring, stagger } from '../../motion/presets';
 import { MoodOrb } from '../food/MoodOrb';
 import { useSaveMood } from '../food/mutations';
 
-/** 首页极简心情卡片：保持 Bento 视觉留白与对称感，点击弹出轻盈选心情浮层 */
+/** 首页轻盈横条心情卡：宽敞单行布局替代窄半栏挤压，点击弹出选心情浮层 */
 export function TodayMoodCard() {
   const moodQuery = useTodayMood();
   const [open, setOpen] = useState(false);
@@ -20,22 +21,25 @@ export function TodayMoodCard() {
 
   return (
     <>
-      <button type="button" onClick={() => setOpen(true)} className="block h-full w-full text-left">
-        <GlassCard interactive variants={stagger.item} className="flex h-full min-h-32 flex-col justify-between p-4">
-          <div className="flex items-center justify-between gap-2">
-            <h2 className="text-[15px] font-semibold">今日心情</h2>
-            <span className="text-xs text-fg-muted">{meta ? '切换' : '记录'}</span>
-          </div>
-
-          <div className="mt-2 flex items-center gap-3">
-            <MoodOrb mood={current} size="md" />
-            <div className="min-w-0 flex-1">
-              <p className="truncate text-base font-semibold">{meta ? meta.label : '点此记录'}</p>
-              <p className="mt-0.5 line-clamp-2 text-xs leading-relaxed text-fg-muted">
-                {moodQuery.data?.note || (meta ? meta.desc : '同步给今日餐食推荐')}
-              </p>
+      <button type="button" onClick={() => setOpen(true)} className="block w-full text-left">
+        <GlassCard interactive variants={stagger.item} className="flex items-center gap-3.5 px-4 py-3.5 sm:px-5">
+          <MoodOrb mood={current} size="sm" />
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-1.5">
+              <span className="text-xs font-medium text-fg-muted">今日心情</span>
+              <span className="text-xs text-fg-muted" aria-hidden>
+                ·
+              </span>
+              <span className="truncate text-sm font-semibold">{meta ? meta.label : '尚未记录'}</span>
             </div>
+            <p className="mt-0.5 truncate text-xs text-fg-muted">
+              {moodQuery.data?.note || (meta ? meta.desc : '记录一下心情，同步给今日餐食推荐')}
+            </p>
           </div>
+          <span className="surface-subtle inline-flex shrink-0 items-center gap-0.5 rounded-full px-2.5 py-1 text-xs font-medium text-fg-muted">
+            {meta ? '切换' : '记录'}
+            <ChevronRightIcon size={13} />
+          </span>
         </GlassCard>
       </button>
 

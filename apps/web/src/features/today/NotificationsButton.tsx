@@ -29,10 +29,10 @@ export function NotificationsButton() {
           setOpen(true);
           if (unread) markRead.mutate();
         }}
-        className="glass-thin relative grid size-11 shrink-0 place-items-center rounded-full!"
+        className="glass-thin relative grid size-10 shrink-0 place-items-center rounded-full!"
         aria-label={unread ? `通知，${unread} 条未读` : '通知'}
       >
-        <BellIcon size={20} />
+        <BellIcon size={19} />
         {unread > 0 && (
           <span className="absolute -right-0.5 -top-0.5 grid h-5 min-w-5 place-items-center rounded-full bg-danger px-1 text-[11px] font-semibold text-white">
             {unread > 99 ? '99+' : unread}

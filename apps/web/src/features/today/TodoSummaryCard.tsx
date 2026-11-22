@@ -1,7 +1,7 @@
 import { dayOffset, formatWhen } from '@gduthelp/shared';
 import { Link } from 'react-router';
 import { GlassCard } from '../../components/GlassCard';
-import { PlusIcon } from '../../components/icons';
+import { CheckIcon, ChevronRightIcon, PlusIcon } from '../../components/icons';
 import { useTodos } from '../../lib/queries';
 import { toast } from '../../lib/toast-store';
 import { useNow } from '../../lib/use-now';
@@ -17,30 +17,43 @@ export function TodoSummaryCard() {
   const dueToday = open.filter((t) => t.dueAt && dayOffset(new Date(t.dueAt), now) <= 0).length;
 
   return (
-    <GlassCard variants={stagger.item} className="col-span-2 p-4">
-      <div className="mb-2.5 flex items-center justify-between gap-2">
-        <Link to="/todo" className="flex min-w-0 items-baseline gap-2">
-          <h2 className="text-[15px] font-semibold">待办</h2>
-          <span className="truncate text-xs text-fg-muted">
-            {open.length ? `${open.length} 项未完成${dueToday ? ` · ${dueToday} 项今天截止` : ''}` : '全部完成'}
+    <GlassCard variants={stagger.item} className="p-4 sm:p-5">
+      <div className="flex items-center justify-between gap-2">
+        <Link to="/todo" className="flex min-w-0 items-center gap-1.5 text-[13px] font-semibold text-fg-muted">
+          <CheckIcon size={15} className="shrink-0 text-accent" />
+          <h2 className="shrink-0">待办</h2>
+          <span className="truncate font-normal">
+            · {open.length ? `${open.length} 项未完成${dueToday ? ` (${dueToday} 今日)` : ''}` : '全部完成'}
           </span>
         </Link>
-        <Link
-          to="/todo?new=1"
-          aria-label="新建待办"
-          className="surface-subtle surface-subtle-hover grid size-7 shrink-0 place-items-center rounded-full text-fg-muted hover:text-fg"
-        >
-          <PlusIcon size={15} />
-        </Link>
+        <div className="flex shrink-0 items-center gap-2">
+          {open.length > 3 && (
+            <Link
+              to="/todo"
+              className="inline-flex items-center gap-0.5 text-xs font-medium text-accent transition-opacity hover:opacity-80"
+            >
+              全部
+              <ChevronRightIcon size={14} />
+            </Link>
+          )}
+          <Link
+            to="/todo?new=1"
+            aria-label="新建待办"
+            className="surface-subtle surface-subtle-hover grid size-7 place-items-center rounded-full text-fg-muted hover:text-fg"
+          >
+            <PlusIcon size={14} />
+          </Link>
+        </div>
       </div>
+
       {open.length === 0 ? (
-        <Link to="/todo?new=1" className="block py-3 text-sm text-fg-muted">
-          手头很清爽，点这里记一件待办
+        <Link to="/todo?new=1" className="mt-3 block py-1 text-sm text-fg-muted">
+          手头很清爽，点这里记一件待办 →
         </Link>
       ) : (
-        <ul className="space-y-2.5">
+        <ul className="mt-2 divide-y divide-current/8">
           {open.slice(0, 3).map((t) => (
-            <li key={t.id} className="flex items-center gap-3">
+            <li key={t.id} className="flex items-center gap-3 py-2.5 first:pt-2 last:pb-0.5">
               <TodoCheck
                 done={false}
                 label={t.title}
@@ -51,7 +64,7 @@ export function TodoSummaryCard() {
                   )
                 }
               />
-              <Link to="/todo" className="min-w-0 flex-1 truncate text-[15px]">
+              <Link to="/todo" className="min-w-0 flex-1 truncate text-sm font-medium">
                 {t.title}
               </Link>
               {t.dueAt && (

@@ -7,11 +7,11 @@
 :root {
   --fg: #2b1b12;
   --fg-muted: rgb(43 27 18 / 0.68);
-  --accent: #e08a00;
+  --accent: #c45a00;
   --accent-fg: #ffffff;
   --danger: #c62828;
   --glass-tint: 255 255 255;
-  --glass-alpha: 0.24;
+  --glass-alpha: 0.28;
   --glass-border: rgb(255 255 255 / 0.45);
   --glass-highlight: rgb(255 255 255 / 0.55);
   --glass-shadow: 0 8px 32px rgb(80 30 10 / 0.18);

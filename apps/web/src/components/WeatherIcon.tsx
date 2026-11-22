@@ -12,6 +12,6 @@ const ICONS = {
 } satisfies Record<WeatherScene, unknown>;
 
 export function WeatherIcon({ scene, size = 22 }: { scene: WeatherScene; size?: number }) {
-  const Icon = ICONS[scene];
+  const Icon = ICONS[scene] ?? SunIcon;
   return <Icon size={size} />;
 }
