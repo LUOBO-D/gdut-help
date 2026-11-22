@@ -60,6 +60,7 @@ model User {
   mealNotifyLogs        MealNotifyLog[]
   classNotifyLogs       ClassNotifyLog[]
   timetableShares       TimetableShare[]
+  exams                 Exam[]
 
   @@map("users")
 }
@@ -109,6 +110,7 @@ model Semester {
 
   courses Course[]
   shares  TimetableShare[]
+  exams   Exam[]
 
   @@map("semesters")
 }
@@ -525,4 +527,34 @@ model TimetableShare {
 
   @@index([expiresAt])
   @@map("timetable_shares")
+}
+
+/// 个人考试安排：支持从广工教务系统一键同步（按 importKey 幂等增量更新）或手动录入（如四六级/期中测验）
+model Exam {
+  id         String       @id @default(uuid()) @db.Uuid
+  userId     String       @map("user_id") @db.Uuid
+  semesterId String       @map("semester_id") @db.Uuid
+  courseName String       @map("course_name")
+  /// 北京日期 'YYYY-MM-DD'（文本存储，避免时区转换偏移）
+  examDate   String       @map("exam_date")
+  /// 开始时间 'HH:mm'
+  startTime  String       @map("start_time")
+  /// 结束时间 'HH:mm'
+  endTime    String       @map("end_time")
+  location   String?
+  seatNo     String?      @map("seat_no")
+  examType   String?      @map("exam_type")
+  campus     String?
+  note       String?
+  source     CourseSource @default(manual)
+  importKey  String?      @map("import_key")
+  createdAt  DateTime     @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt  DateTime     @updatedAt @map("updated_at") @db.Timestamptz
+
+  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  semester Semester @relation(fields: [semesterId], references: [id], onDelete: Cascade)
+
+  @@index([userId, semesterId])
+  @@index([userId, examDate])
+  @@map("exams")
 }

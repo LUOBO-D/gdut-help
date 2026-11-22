@@ -1,6 +1,7 @@
 import { randomBytes } from 'node:crypto';
 import { HttpStatus, Injectable } from '@nestjs/common';
 import {
+  alignToMonday,
   COURSE_COLORS,
   courseInputSchema,
   defaultGdutSemester,
@@ -41,8 +42,10 @@ type ImportData = z.output<typeof timetableImportSchema>;
 const toSemester = (s: SemesterRow): Semester => ({
   id: s.id,
   name: s.name,
-  // DATE 列读出来是当天 UTC 零点
-  startDate: formatDate({ year: s.startDate.getUTCFullYear(), month: s.startDate.getUTCMonth() + 1, day: s.startDate.getUTCDate() }),
+  // DATE 列读出来是当天 UTC 零点；再做一次周一兜底对齐，防止手工改库或迁移造成整周星期偏移 1 天
+  startDate: alignToMonday(
+    formatDate({ year: s.startDate.getUTCFullYear(), month: s.startDate.getUTCMonth() + 1, day: s.startDate.getUTCDate() }),
+  ),
   totalWeeks: s.totalWeeks,
 });
 

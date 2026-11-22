@@ -1,6 +1,7 @@
 import {
   addDays,
   dateOf,
+  examStatus,
   formatHm,
   matchCampusBuilding,
   parseDate,
@@ -9,13 +10,14 @@ import {
   today,
   weekOf,
   type ClassSession,
+  type Exam,
   type TimetableData,
   type TimetableShareCreated,
 } from '@gduthelp/shared';
 import { useMutation } from '@tanstack/react-query';
 import { motion, type PanInfo } from 'motion/react';
 import { lazy, Suspense, useMemo, useState } from 'react';
-import { Link, useNavigate } from 'react-router';
+import { Link, useNavigate, useSearchParams } from 'react-router';
 import { Button } from '../../components/Button';
 import { GlassCard } from '../../components/GlassCard';
 import { ChevronLeftIcon, ChevronRightIcon, NavigationIcon, PinIcon, PlusIcon } from '../../components/icons';
@@ -24,36 +26,57 @@ import { Sheet } from '../../components/Sheet';
 import { CardSkeleton } from '../../components/Skeleton';
 import { api, ApiError } from '../../lib/api';
 import { useAuth } from '../../lib/auth-store';
-import { useTimetable } from '../../lib/queries';
+import { useExams, useTimetable } from '../../lib/queries';
 import { toast } from '../../lib/toast-store';
 import { useNow } from '../../lib/use-now';
 import { pressable, spring } from '../../motion/presets';
 import { CourseEditor, type CourseDraft } from './CourseEditor';
+import { ExamEditorSheet, type ExamDraft } from './ExamEditorSheet';
+import { ExamPanel } from './ExamPanel';
 import { WEEKDAY_LABEL } from './weekday';
 import { WeekGrid } from './WeekGrid';
 
 // 导入用得少，按需加载
 const ImportSheet = lazy(() => import('./ImportSheet').then((m) => ({ default: m.ImportSheet })));
+const ExamImportSheet = lazy(() => import('./ExamImportSheet').then((m) => ({ default: m.ExamImportSheet })));
 
-type View = 'day' | 'week';
+type View = 'day' | 'week' | 'exam';
 const VIEW_KEY = 'gduthelp-timetable-view';
+const EMPTY_EXAMS: Exam[] = [];
+
+function resolveInitialView(param: string | null): View {
+  if (param === 'exam' || param === 'day' || param === 'week') return param;
+  const saved = localStorage.getItem(VIEW_KEY);
+  return saved === 'week' || saved === 'exam' ? saved : 'day';
+}
 
 export function TimetablePage() {
   const { data, isPending } = useTimetable();
+  const examsQuery = useExams();
   const user = useAuth((s) => s.user);
   const now = useNow();
+  const [searchParams, setSearchParams] = useSearchParams();
   const semester = data?.semester ?? null;
   const todayStr = today(now);
   const currentWeek = semester ? weekOf(semester, todayStr) : null;
   const [week, setWeek] = useState<number | null>(null);
   /** 选中的是星期几（1–7）。没选时：本周默认今天，其他周默认周一 */
   const [weekday, setWeekday] = useState<number | null>(null);
-  const [view, setView] = useState<View>(() => (localStorage.getItem(VIEW_KEY) === 'week' ? 'week' : 'day'));
+  const [view, setView] = useState<View>(() => resolveInitialView(searchParams.get('view')));
   const [draft, setDraft] = useState<CourseDraft | null>(null);
   const [importing, setImporting] = useState(false);
   /** 打开过一次后保持挂载，关闭时才有收起动画 */
   const [importLoaded, setImportLoaded] = useState(false);
+  const [examDraft, setExamDraft] = useState<ExamDraft | null>(null);
+  const [examImporting, setExamImporting] = useState(false);
+  const [examImportLoaded, setExamImportLoaded] = useState(false);
   const [shareInfo, setShareInfo] = useState<TimetableShareCreated | null>(null);
+
+  const exams = examsQuery.data?.exams ?? EMPTY_EXAMS;
+  const upcomingExamCount = useMemo(
+    () => exams.filter((e) => examStatus(e, now) !== 'finished').length,
+    [exams, now],
+  );
 
   const shareMutation = useMutation({
     mutationFn: () => api<TimetableShareCreated>('/timetable/share', { method: 'POST' }),
@@ -113,11 +136,20 @@ export function TimetablePage() {
   };
   const changeView = (v: View) => {
     setView(v);
-    localStorage.setItem(VIEW_KEY, v);
+    if (v !== 'exam') localStorage.setItem(VIEW_KEY, v);
+    if (searchParams.has('view')) {
+      const next = new URLSearchParams(searchParams);
+      next.delete('view');
+      setSearchParams(next, { replace: true });
+    }
   };
   const openImport = () => {
     setImportLoaded(true);
     setImporting(true);
+  };
+  const openExamImport = () => {
+    setExamImportLoaded(true);
+    setExamImporting(true);
   };
 
   return (
@@ -126,50 +158,73 @@ export function TimetablePage() {
         title="课表"
         subtitle={`${semester.name} · ${currentWeek ? `本周第 ${currentWeek} 周` : todayStr < semester.startDate ? '还没开学' : '学期已结束'}`}
         action={
-          <div className="flex gap-2">
-            {data!.courses.length > 0 && (
-              <Button variant="ghost" className="h-10 px-3 text-sm" loading={shareMutation.isPending} onClick={() => shareMutation.mutate()}>
-                分享
+          view === 'exam' ? (
+            <div className="flex gap-2">
+              <Button variant="ghost" className="h-10 px-3 text-sm" onClick={openExamImport}>
+                同步
               </Button>
-            )}
-            <Button variant="ghost" className="h-10 px-3 text-sm" onClick={openImport}>
-              导入
-            </Button>
-            <Button className="h-10 px-3 text-sm" onClick={() => setDraft(view === 'day' ? { weekday: selectedWeekday } : {})}>
-              <PlusIcon size={18} />
-              添加
-            </Button>
-          </div>
+              <Button className="h-10 px-3 text-sm" onClick={() => setExamDraft({})}>
+                <PlusIcon size={18} />
+                添加
+              </Button>
+            </div>
+          ) : (
+            <div className="flex gap-2">
+              {data!.courses.length > 0 && (
+                <Button variant="ghost" className="h-10 px-3 text-sm" loading={shareMutation.isPending} onClick={() => shareMutation.mutate()}>
+                  分享
+                </Button>
+              )}
+              <Button variant="ghost" className="h-10 px-3 text-sm" onClick={openImport}>
+                导入
+              </Button>
+              <Button className="h-10 px-3 text-sm" onClick={() => setDraft(view === 'day' ? { weekday: selectedWeekday } : {})}>
+                <PlusIcon size={18} />
+                添加
+              </Button>
+            </div>
+          )
         }
       />
 
       <div className="mb-3 flex items-center justify-between gap-3">
-        <ViewSwitch value={view} onChange={changeView} />
-        <div className="flex items-center gap-1">
-          <button type="button" className="glass-thin grid size-9 place-items-center rounded-full!" aria-label="上一周" disabled={shown <= 1} onClick={() => goWeek(shown - 1)}>
-            <ChevronLeftIcon size={18} />
-          </button>
-          <div className="min-w-[4.5rem] text-center">
-            <p className="text-sm font-semibold">第 {shown} 周</p>
-            {currentWeek !== null && shown !== currentWeek && (
-              <button type="button" className="text-xs text-accent" onClick={() => goWeek(currentWeek)}>
-                回到本周
-              </button>
-            )}
+        <ViewSwitch value={view} onChange={changeView} examCount={upcomingExamCount} />
+        {view !== 'exam' && (
+          <div className="flex items-center gap-1">
+            <button type="button" className="glass-thin grid size-9 place-items-center rounded-full!" aria-label="上一周" disabled={shown <= 1} onClick={() => goWeek(shown - 1)}>
+              <ChevronLeftIcon size={18} />
+            </button>
+            <div className="min-w-[4.5rem] text-center">
+              <p className="text-sm font-semibold">第 {shown} 周</p>
+              {currentWeek !== null && shown !== currentWeek && (
+                <button type="button" className="text-xs text-accent" onClick={() => goWeek(currentWeek)}>
+                  回到本周
+                </button>
+              )}
+            </div>
+            <button
+              type="button"
+              className="glass-thin grid size-9 place-items-center rounded-full!"
+              aria-label="下一周"
+              disabled={shown >= semester.totalWeeks}
+              onClick={() => goWeek(shown + 1)}
+            >
+              <ChevronRightIcon size={18} />
+            </button>
           </div>
-          <button
-            type="button"
-            className="glass-thin grid size-9 place-items-center rounded-full!"
-            aria-label="下一周"
-            disabled={shown >= semester.totalWeeks}
-            onClick={() => goWeek(shown + 1)}
-          >
-            <ChevronRightIcon size={18} />
-          </button>
-        </div>
+        )}
       </div>
 
-      {view === 'day' ? (
+      {view === 'exam' ? (
+        <ExamPanel
+          exams={exams}
+          isLoading={examsQuery.isPending}
+          now={now}
+          onAdd={() => setExamDraft({})}
+          onImport={openExamImport}
+          onEdit={(exam) => setExamDraft({ exam })}
+        />
+      ) : view === 'day' ? (
         <>
           <WeekStrip
             data={data!}
@@ -196,9 +251,12 @@ export function TimetablePage() {
         <WeekGrid semester={semester} courses={data!.courses} shown={shown} todayStr={todayStr} periods={periods} setDraft={setDraft} />
       )}
 
-      {data!.courses.length === 0 && <p className="mt-3 text-center text-sm text-fg-muted">点右上角「添加」录入第一门课，或者「导入」教务系统的课表</p>}
+      {view !== 'exam' && data!.courses.length === 0 && (
+        <p className="mt-3 text-center text-sm text-fg-muted">点右上角「添加」录入第一门课，或者「导入」教务系统的课表</p>
+      )}
 
       <CourseEditor draft={draft} semester={semester} onClose={() => setDraft(null)} />
+      <ExamEditorSheet draft={examDraft} onClose={() => setExamDraft(null)} />
       <Sheet open={Boolean(shareInfo)} onClose={() => setShareInfo(null)} title="分享本学期课表">
         {shareInfo && (
           <div className="space-y-4 pb-2 text-center">
@@ -227,21 +285,32 @@ export function TimetablePage() {
           <ImportSheet open={importing} onClose={() => setImporting(false)} semester={semester} courses={data!.courses} />
         </Suspense>
       )}
+      {examImportLoaded && (
+        <Suspense fallback={null}>
+          <ExamImportSheet open={examImporting} onClose={() => setExamImporting(false)} exams={exams} />
+        </Suspense>
+      )}
     </>
   );
 }
 
-function ViewSwitch({ value, onChange }: { value: View; onChange: (v: View) => void }) {
+function ViewSwitch({ value, onChange, examCount }: { value: View; onChange: (v: View) => void; examCount: number }) {
   const options: [View, string][] = [
     ['day', '按天'],
     ['week', '整周'],
+    ['exam', '考试'],
   ];
   return (
     <div className="glass-thin flex rounded-full p-1 text-sm" role="tablist" aria-label="课表视图">
       {options.map(([v, label]) => (
-        <button key={v} type="button" role="tab" aria-selected={value === v} className="relative rounded-full px-3.5 py-1.5" onClick={() => onChange(v)}>
+        <button key={v} type="button" role="tab" aria-selected={value === v} className="relative flex items-center gap-1 rounded-full px-3.5 py-1.5" onClick={() => onChange(v)}>
           {value === v && <motion.span layoutId="timetable-view" className="absolute inset-0 rounded-full bg-white/35 shadow-sm" transition={spring.snappy} />}
           <span className={`relative ${value === v ? 'font-semibold' : 'text-fg-muted'}`}>{label}</span>
+          {v === 'exam' && examCount > 0 && (
+            <span className="relative rounded-full bg-accent px-1.5 py-0.2 text-[10px] font-semibold text-accent-fg tabular-nums">
+              {examCount}
+            </span>
+          )}
         </button>
       ))}
     </div>

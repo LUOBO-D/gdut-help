@@ -1,5 +1,16 @@
-/** 待办与课前提醒 → 本地通知的排程计算。纯函数，不依赖 Capacitor，方便测试 */
-import { addDays, formatHm, reminderBody, sessionsOn, today, type TimetableData, type Todo } from '@gduthelp/shared';
+/** 待办、课前与考前提醒 → 本地通知的排程计算。纯函数，不依赖 Capacitor，方便测试 */
+import {
+  addDays,
+  examStartDate,
+  formatHm,
+  reminderBody,
+  sessionsOn,
+  shanghaiTime,
+  today,
+  type ExamData,
+  type TimetableData,
+  type Todo,
+} from '@gduthelp/shared';
 
 /** 只排未来 7 天内的提醒。之后的会在下次打开 App 时排上 */
 const HORIZON_DAYS = 7;
@@ -87,10 +98,54 @@ export function planClassReminders(
   return planned.sort((a, b) => a.at.getTime() - b.at.getTime()).slice(0, MAX_SCHEDULED);
 }
 
-/** 合并待办 + 课前通知并控制在安卓安全上限内 */
+/** 从考试安排算出未来 7 天的考前本地通知：考前一天 20:00 + 考前 1 小时 */
+export function planExamReminders(examData: ExamData | undefined, now: Date): PlannedReminder[] {
+  if (!examData?.exams.length) return [];
+  const nowMs = now.getTime();
+  const untilMs = nowMs + HORIZON_MS;
+  const planned: PlannedReminder[] = [];
+
+  for (const exam of examData.exams) {
+    const start = examStartDate(exam);
+    const placeParts = [exam.location, exam.seatNo ? `座位 ${exam.seatNo}` : null].filter(Boolean);
+    const place = placeParts.length ? ` · ${placeParts.join(' · ')}` : '';
+    const detail = `${exam.startTime}–${exam.endTime}${place}`;
+
+    // 1. 前一天晚上 20:00 提前提醒（检查证件、文具和考场）
+    const eve = shanghaiTime(addDays(exam.examDate, -1), '20:00');
+    if (eve.getTime() > nowMs && eve.getTime() <= untilMs) {
+      planned.push({
+        id: notificationId(`exam:eve:${exam.id}:${exam.examDate}`),
+        todoId: `exam:${exam.id}`,
+        title: `明天考试：${exam.courseName}`,
+        body: `${detail}（记得带好校园卡/身份证）`,
+        at: eve,
+        link: '/timetable?view=exam',
+      });
+    }
+
+    // 2. 考前 60 分钟提醒出发
+    const oneHourBefore = new Date(start.getTime() - 60 * 60_000);
+    if (oneHourBefore.getTime() > nowMs && oneHourBefore.getTime() <= untilMs) {
+      planned.push({
+        id: notificationId(`exam:1h:${exam.id}:${exam.examDate}:${exam.startTime}`),
+        todoId: `exam:${exam.id}`,
+        title: `1 小时后开考：${exam.courseName}`,
+        body: detail,
+        at: oneHourBefore,
+        link: '/timetable?view=exam',
+      });
+    }
+  }
+
+  return planned.sort((a, b) => a.at.getTime() - b.at.getTime()).slice(0, MAX_SCHEDULED);
+}
+
+/** 合并待办 + 课前 + 考前通知并控制在安卓安全上限内 */
 export function planAllReminders(opts: {
   todos: Todo[];
   timetable?: TimetableData;
+  exams?: ExamData;
   campusId?: string | null;
   classRemindMinutes: number;
   now: Date;
@@ -98,6 +153,7 @@ export function planAllReminders(opts: {
   const merged = [
     ...planReminders(opts.todos, opts.now),
     ...planClassReminders(opts.timetable, opts.campusId, opts.classRemindMinutes, opts.now),
+    ...planExamReminders(opts.exams, opts.now),
   ];
   return merged.sort((a, b) => a.at.getTime() - b.at.getTime()).slice(0, MAX_SCHEDULED);
 }

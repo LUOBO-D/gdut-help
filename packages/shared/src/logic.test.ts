@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { compareSemver } from './app-update.js';
 import { addDays, daysBetween, parseDate, shanghaiDate, shanghaiTime, today } from './time.js';
 import { semesterInputSchema } from './timetable-schema.js';
-import { dateOf, defaultGdutSemester, sessionsOn, weekOf, type TimetableData } from './timetable.js';
+import { alignToMonday, dateOf, defaultGdutSemester, sessionsOn, weekOf, type TimetableData } from './timetable.js';
 import { reminderFireAt, todoInputSchema } from './todo.js';
 
 describe('北京时间', () => {
@@ -45,6 +45,14 @@ describe('学期周次', () => {
   it('开学日期必须是周一', () => {
     expect(semesterInputSchema.safeParse({ name: 'x', startDate: '2026-09-08', totalWeeks: 18 }).success).toBe(false);
     expect(semesterInputSchema.safeParse({ name: 'x', startDate: '2026-09-07', totalWeeks: 18 }).success).toBe(true);
+  });
+
+  it('若数据库开学日期意外偏到周日，自动兜底对齐到周一避免整周错位', () => {
+    const shifted = { startDate: '2026-08-30', totalWeeks: 20 }; // 周日
+    expect(alignToMonday('2026-08-30')).toBe('2026-08-31'); // 对齐到周一
+    expect(weekOf(shifted, '2026-11-22')).toBe(12); // 11月22日（周日）属于第 12 周
+    expect(dateOf(shifted, 12, 1)).toBe('2026-11-16'); // 第 12 周周一
+    expect(dateOf(shifted, 12, 7)).toBe('2026-11-22'); // 第 12 周周日正好是今天
   });
 });
 

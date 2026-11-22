@@ -1,6 +1,6 @@
-import type { TimetableData, Todo } from '@gduthelp/shared';
+import type { ExamData, TimetableData, Todo } from '@gduthelp/shared';
 import { describe, expect, it } from 'vitest';
-import { notificationId, planClassReminders, planReminders, TEST_NOTIFICATION_ID } from './reminder-plan';
+import { notificationId, planClassReminders, planExamReminders, planReminders, TEST_NOTIFICATION_ID } from './reminder-plan';
 
 const now = new Date('2026-11-20T02:00:00Z'); // 北京时间 10:00
 const iso = (minutesFromNow: number) => new Date(now.getTime() + minutesFromNow * 60_000).toISOString();
@@ -99,5 +99,38 @@ describe('planClassReminders', () => {
     expect(plans[0]!.body).toContain('08:30');
     expect(plans[0]!.body).toContain('教2-101');
     expect(plans[0]!.link).toBe('/timetable');
+  });
+});
+
+describe('planExamReminders', () => {
+  it('plans eve 20:00 and 1h-before exam notifications within 7 days', () => {
+    const base = new Date('2027-01-06T12:00:00+08:00');
+    const examData: ExamData = {
+      semester: { id: 's1', name: '2026秋', startDate: '2026-08-31', totalWeeks: 20 },
+      exams: [
+        {
+          id: 'ex-1',
+          courseName: '高等数学A(1)',
+          examDate: '2027-01-08',
+          startTime: '08:30',
+          endTime: '10:30',
+          location: '教3-305',
+          seatNo: '18',
+          examType: '期末考试',
+          campus: '大学城校区',
+          note: null,
+          source: 'import',
+          importKey: 'code:math|2027-01-08',
+        },
+      ],
+    };
+    const plans = planExamReminders(examData, base);
+    expect(plans).toHaveLength(2);
+    expect(plans[0]!.title).toBe('明天考试：高等数学A(1)');
+    expect(plans[0]!.body).toContain('教3-305');
+    expect(plans[0]!.body).toContain('座位 18');
+    expect(plans[0]!.link).toBe('/timetable?view=exam');
+    expect(plans[1]!.title).toBe('1 小时后开考：高等数学A(1)');
+    expect(plans[1]!.at.toISOString()).toBe(new Date('2027-01-08T07:30:00+08:00').toISOString());
   });
 });

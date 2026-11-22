@@ -1,9 +1,19 @@
 import type { ReactNode } from 'react';
 
 /** 表单项：标签 + 控件 + 可选的说明 */
-export function Field({ label, hint, children }: { label: string; hint?: string; children: ReactNode }) {
+export function Field({
+  label,
+  hint,
+  className = '',
+  children,
+}: {
+  label: string;
+  hint?: string;
+  className?: string;
+  children: ReactNode;
+}) {
   return (
-    <label className="block">
+    <label className={`block ${className}`}>
       <span className="mb-1.5 block text-sm text-fg-muted">{label}</span>
       {children}
       {hint && <span className="mt-1 block text-xs text-fg-muted">{hint}</span>}

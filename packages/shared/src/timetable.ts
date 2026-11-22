@@ -6,13 +6,16 @@ export type { CourseInput, CourseSlot, SemesterInput } from './timetable-schema.
 
 export { COURSE_COLORS, MAX_WEEKS } from './timetable-schema.js';
 
+/** 将任意日期对齐到最近的星期一（周二至周四回退本周一，周五至周日顺延下周一），避免时区偏移导致星期整体错位 */
+export function alignToMonday(date: string): string {
+  const wd = parseDate(date).weekday;
+  const delta = wd === 1 ? 0 : wd <= 4 ? -(wd - 1) : 8 - wd;
+  return delta === 0 ? date : addDays(date, delta);
+}
+
 /** 找到给定日期所在周或之后最近的星期一 */
 function mondayNearest(year: number, month: number, day: number): string {
-  const base = formatDate({ year, month, day });
-  const wd = parseDate(base).weekday;
-  // 若是周二至周四回退到本周一；周五至周日顺延到下周一
-  const delta = wd === 1 ? 0 : wd <= 4 ? -(wd - 1) : 8 - wd;
-  return addDays(base, delta);
+  return alignToMonday(formatDate({ year, month, day }));
 }
 
 /**
@@ -61,7 +64,8 @@ export interface TimetableData {
 
 /** 某天是学期第几周；不在学期内返回 null */
 export function weekOf(semester: Pick<Semester, 'startDate' | 'totalWeeks'>, date: string): number | null {
-  const diff = daysBetween(semester.startDate, date);
+  const startMonday = alignToMonday(semester.startDate);
+  const diff = daysBetween(startMonday, date);
   if (diff < 0) return null;
   const week = Math.floor(diff / 7) + 1;
   return week <= semester.totalWeeks ? week : null;
@@ -69,7 +73,8 @@ export function weekOf(semester: Pick<Semester, 'startDate' | 'totalWeeks'>, dat
 
 /** 第 week 周星期 weekday 的日期 */
 export function dateOf(semester: Pick<Semester, 'startDate'>, week: number, weekday: number): string {
-  return addDays(semester.startDate, (week - 1) * 7 + (weekday - 1));
+  const startMonday = alignToMonday(semester.startDate);
+  return addDays(startMonday, (week - 1) * 7 + (weekday - 1));
 }
 
 export interface ClassSession {

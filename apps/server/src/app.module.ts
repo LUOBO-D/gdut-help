@@ -4,6 +4,7 @@ import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { AppUpdateModule } from './app-update/app-update.module.js';
 import { AuthModule } from './auth/auth.module.js';
 import { AppConfigModule } from './config/config.module.js';
+import { ExamModule } from './exam/exam.module.js';
 import { HealthController } from './health/health.controller.js';
 import { MailModule } from './mail/mail.module.js';
 import { MerchantModule } from './merchant/merchant.module.js';
@@ -28,6 +29,7 @@ import { WeatherModule } from './weather/weather.module.js';
     UsersModule,
     WeatherModule,
     TimetableModule,
+    ExamModule,
     NotifyModule,
     TodoModule,
     MerchantModule,

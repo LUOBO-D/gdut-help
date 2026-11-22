@@ -156,6 +156,19 @@ export interface UserDataExport {
     source: string;
     slots: { weekday: number; periodStart: number; periodEnd: number; weeks: number[]; location: string | null }[];
   }[];
+  exams?: {
+    courseName: string;
+    semester: string;
+    examDate: string;
+    startTime: string;
+    endTime: string;
+    location: string | null;
+    seatNo: string | null;
+    examType: string | null;
+    campus: string | null;
+    note: string | null;
+    source: string;
+  }[];
   todos: {
     title: string;
     note: string | null;

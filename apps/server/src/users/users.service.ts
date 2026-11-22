@@ -45,13 +45,18 @@ export class UsersService {
 
   /** 导出当前账号的完整个人数据（JSON 备份） */
   async exportData(userId: string): Promise<UserDataExport> {
-    const [user, pref, courses, todos, moodLogs, reviews] = await Promise.all([
+    const [user, pref, courses, exams, todos, moodLogs, reviews] = await Promise.all([
       this.prisma.user.findUnique({ where: { id: userId } }),
       this.prisma.userPreference.findUnique({ where: { userId } }),
       this.prisma.course.findMany({
         where: { userId },
         include: { slots: true, semester: { select: { name: true } } },
         orderBy: { createdAt: 'asc' },
+      }),
+      this.prisma.exam.findMany({
+        where: { userId },
+        include: { semester: { select: { name: true } } },
+        orderBy: [{ examDate: 'asc' }, { startTime: 'asc' }],
       }),
       this.prisma.todo.findMany({
         where: { userId },
@@ -94,6 +99,19 @@ export class UsersService {
           weeks: s.weeks,
           location: s.location,
         })),
+      })),
+      exams: exams.map((e) => ({
+        courseName: e.courseName,
+        semester: e.semester.name,
+        examDate: e.examDate,
+        startTime: e.startTime,
+        endTime: e.endTime,
+        location: e.location,
+        seatNo: e.seatNo,
+        examType: e.examType,
+        campus: e.campus,
+        note: e.note,
+        source: e.source,
       })),
       todos: todos.map((t) => ({
         title: t.title,

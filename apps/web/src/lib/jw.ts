@@ -159,3 +159,52 @@ export async function jwWeekOneMonday(semesterCode: string): Promise<string | nu
     return null;
   }
 }
+
+function tryJsonText(raw: unknown): string | null {
+  const text = (typeof raw === 'string' ? raw : JSON.stringify(raw)).trim();
+  if (!text.startsWith('{') && !text.startsWith('[')) return null;
+  try {
+    JSON.parse(text);
+    return text;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * 读取教务系统考试安排（乘方教务 xsksap）。
+ * 1. 优先请求 /xsksap!getDataList.action（POST xnxqdm + 分页参数），返回 `{ total, rows: [...] }`；
+ * 2. 若页面接口路径有定制差异，回退读取 /xsksap!xsksapList.action 探测真实 action 或直接提取表格 HTML。
+ */
+export async function jwExamsPayload(semesterCode: string): Promise<string> {
+  const form = {
+    xnxqdm: semesterCode,
+    page: '1',
+    rows: '100',
+    sort: 'ksrq',
+    order: 'asc',
+  };
+
+  const primary = await jwRequest('/xsksap!getDataList.action', { method: 'POST', data: form });
+  const primaryJson = tryJsonText(primary.data);
+  if (primaryJson) return primaryJson;
+
+  // 回退读取考试安排列表页，探测页面内真实 AJAX 地址或服务端渲染表格
+  const pageRes = await jwRequest(`/xsksap!xsksapList.action?xnxqdm=${encodeURIComponent(semesterCode)}`);
+  const html = typeof pageRes.data === 'string' ? pageRes.data : JSON.stringify(pageRes.data);
+  const pageJson = tryJsonText(html);
+  if (pageJson) return pageJson;
+
+  const actionMatch = /['"](\/?[a-zA-Z0-9_/-]*ks[a-zA-Z0-9_-]*![a-zA-Z0-9_]+\.action)['"]/i.exec(html);
+  if (actionMatch?.[1]) {
+    const discoveredPath = actionMatch[1].startsWith('/') ? actionMatch[1] : `/${actionMatch[1]}`;
+    if (discoveredPath !== '/xsksap!getDataList.action') {
+      const sub = await jwRequest(discoveredPath, { method: 'POST', data: form });
+      const subJson = tryJsonText(sub.data);
+      if (subJson) return subJson;
+    }
+  }
+
+  if (/<tr\b/i.test(html)) return html;
+  return '{"total":0,"rows":[]}';
+}

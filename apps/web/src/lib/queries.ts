@@ -1,6 +1,7 @@
 import {
   DEFAULT_CAMPUS_ID,
   type DiningContext,
+  type ExamData,
   type MealFeedback,
   type MealRecommendationResponse,
   type MealType,
@@ -24,6 +25,7 @@ import { useAuth } from './auth-store';
 export const keys = {
   weather: (campusId: string | null) => ['weather', campusId] as const,
   timetable: ['timetable'] as const,
+  exams: ['exams'] as const,
   todos: ['todos'] as const,
   notifications: ['notifications'] as const,
   preferences: ['preferences'] as const,
@@ -59,6 +61,15 @@ export function useTimetable() {
   return useQuery({
     queryKey: keys.timetable,
     queryFn: () => api<TimetableData>('/timetable'),
+    enabled: useLoggedIn(),
+    staleTime: 5 * 60_000,
+  });
+}
+
+export function useExams() {
+  return useQuery({
+    queryKey: keys.exams,
+    queryFn: () => api<ExamData>('/exams'),
     enabled: useLoggedIn(),
     staleTime: 5 * 60_000,
   });

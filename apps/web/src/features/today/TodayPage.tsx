@@ -1,8 +1,8 @@
-import { dayOffset, formatWhen, today, weekOf } from '@gduthelp/shared';
+import { dayOffset, examCountdownText, formatWhen, nextUpcomingExam, today, weekOf } from '@gduthelp/shared';
 import { motion } from 'motion/react';
 import { Link } from 'react-router';
 import { useAuth } from '../../lib/auth-store';
-import { useTimetable, useTodos } from '../../lib/queries';
+import { useExams, useTimetable, useTodos } from '../../lib/queries';
 import { useNow } from '../../lib/use-now';
 import { stagger } from '../../motion/presets';
 import { NextClassCard } from './NextClassCard';
@@ -27,8 +27,10 @@ export function TodayPage() {
   const user = useAuth((s) => s.user);
   const now = useNow();
   const semester = useTimetable().data?.semester;
+  const exams = useExams().data?.exams;
   const todos = useTodos().data;
   const week = semester ? weekOf(semester, today(now)) : null;
+  const nextExam = exams ? nextUpcomingExam(exams, now) : null;
   const hour = now.getHours();
   // 饭点时段（11:00–13:00 / 17:00–19:00）把餐食推荐上移到时间线下方
   const mealPriority = (hour >= 11 && hour < 13) || (hour >= 17 && hour < 19);
@@ -62,16 +64,30 @@ export function TodayPage() {
           <h1 className="mt-1 break-all text-[28px] font-bold leading-tight">
             {greeting(hour)}，{user?.nickname}
           </h1>
-          {urgentDdl && ddlBadge && (
-            <Link
-              to="/todo"
-              className="glass-thin mt-2 inline-flex max-w-full items-center gap-2 rounded-full! px-3 py-1 text-xs font-medium transition-opacity hover:opacity-85"
-            >
-              <span className="size-1.5 shrink-0 rounded-full bg-danger" aria-hidden />
-              <span className="truncate">{urgentDdl.todo.title}</span>
-              <span className="shrink-0 font-num text-danger tabular-nums">· {ddlBadge}</span>
-            </Link>
-          )}
+          {(urgentDdl && ddlBadge) || nextExam ? (
+            <div className="mt-2 flex flex-wrap gap-1.5">
+              {urgentDdl && ddlBadge && (
+                <Link
+                  to="/todo"
+                  className="glass-thin inline-flex max-w-full items-center gap-2 rounded-full! px-3 py-1 text-xs font-medium transition-opacity hover:opacity-85"
+                >
+                  <span className="size-1.5 shrink-0 rounded-full bg-danger" aria-hidden />
+                  <span className="truncate">{urgentDdl.todo.title}</span>
+                  <span className="shrink-0 font-num text-danger tabular-nums">· {ddlBadge}</span>
+                </Link>
+              )}
+              {nextExam && (
+                <Link
+                  to="/timetable?view=exam"
+                  className="glass-thin inline-flex max-w-full items-center gap-2 rounded-full! px-3 py-1 text-xs font-medium transition-opacity hover:opacity-85"
+                >
+                  <span className="size-1.5 shrink-0 rounded-full bg-accent" aria-hidden />
+                  <span className="truncate">考试：{nextExam.courseName}</span>
+                  <span className="shrink-0 font-num text-accent tabular-nums">· {examCountdownText(nextExam, now)}</span>
+                </Link>
+              )}
+            </div>
+          ) : null}
         </div>
         <div className="flex shrink-0 gap-2">
           <NotificationsButton />
