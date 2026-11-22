@@ -21,6 +21,8 @@ export default defineConfig({
         // three.js 分包约 1MB，也预缓存，离线时 3D 天空照常显示
         maximumFileSizeToCacheInBytes: 3 * 1024 * 1024,
         globPatterns: ['**/*.{js,css,html,svg,png,woff2}'],
+        // 跳过 detect-gpu 的桌面/移动端显卡基准分片，首次检测按需拉取，PWA 预缓存立减约 40%+
+        globIgnores: ['**/d-*.js', '**/m-*.js'],
       },
       // 开发服务器也启用，方便测试推送
       devOptions: { enabled: true, type: 'module', navigateFallback: 'index.html' },

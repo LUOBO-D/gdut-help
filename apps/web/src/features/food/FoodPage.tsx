@@ -1,15 +1,23 @@
 import {
+  DEFAULT_CAMPUS_ID,
+  DINING_PACE_LABELS,
+  DINING_PACE_MODES,
+  DINING_PARTY_LABELS,
+  DINING_PARTY_MODES,
   MEAL_LABELS,
   MEAL_TYPES,
   MERCHANT_CATEGORIES,
   MERCHANT_CATEGORY_LABELS,
   defaultMealForHour,
+  type DiningContext,
+  type DiningPaceMode,
+  type DiningPartyMode,
   type MealRecommendation,
   type MealType,
   type Merchant,
   type MerchantCategory,
 } from '@gduthelp/shared';
-import { AnimatePresence, motion } from 'motion/react';
+import { AnimatePresence, motion, type PanInfo } from 'motion/react';
 import { useMemo, useState } from 'react';
 import { Button } from '../../components/Button';
 import { Chip } from '../../components/Field';
@@ -17,23 +25,31 @@ import { GlassCard } from '../../components/GlassCard';
 import { PageHeader } from '../../components/PageHeader';
 import { SkeletonBlock } from '../../components/Skeleton';
 import { PinIcon, PlusIcon } from '../../components/icons';
+import { ApiError } from '../../lib/api';
+import { useAuth } from '../../lib/auth-store';
+import { hapticLight } from '../../lib/native-ux';
 import { useMealHistory, useMealRecommendations, useMerchants, usePreferences, useTodayMood } from '../../lib/queries';
 import { toast } from '../../lib/toast-store';
 import { useNow } from '../../lib/use-now';
 import { pressable, spring, stagger } from '../../motion/presets';
+import { RankingContent } from '../ranking/RankingContent';
 import { MerchantDetailSheet } from './MerchantDetailSheet';
 import { MerchantEditorSheet } from './MerchantEditorSheet';
 import { MoodCard } from './MoodCard';
 import { PreferencesSheet } from './PreferencesSheet';
-import { useSendMealFeedback } from './mutations';
+import { useSeedHemcMerchants, useSendMealFeedback } from './mutations';
 
-type FoodView = 'recommend' | 'directory';
+type FoodView = 'recommend' | 'ranking' | 'directory';
 
 export function FoodPage() {
+  const user = useAuth((s) => s.user);
+  const campusId = user?.campusId ?? DEFAULT_CAMPUS_ID;
   const now = useNow(60_000);
   const initialMeal = defaultMealForHour(now.getHours());
   const [view, setView] = useState<FoodView>('recommend');
   const [meal, setMeal] = useState<MealType>(initialMeal);
+  const [party, setParty] = useState<DiningPartyMode | undefined>(undefined);
+  const [pace, setPace] = useState<DiningPaceMode | undefined>(undefined);
   const [excludeByMeal, setExcludeByMeal] = useState<Record<MealType, string[]>>({ lunch: [], dinner: [] });
 
   const [prefOpen, setPrefOpen] = useState(false);
@@ -44,13 +60,34 @@ export function FoodPage() {
   const [filterCat, setFilterCat] = useState<MerchantCategory | undefined>(undefined);
   const [search, setSearch] = useState('');
 
+  const context: DiningContext | undefined = party || pace ? { party, pace } : undefined;
+
   const moodQuery = useTodayMood();
   const prefQuery = usePreferences();
-  const recQuery = useMealRecommendations(meal, excludeByMeal[meal]);
+  const recQuery = useMealRecommendations(meal, excludeByMeal[meal], context);
   const merchantsQuery = useMerchants(filterCat, search);
   const allCampusMerchants = useMerchants();
   const historyQuery = useMealHistory();
   const feedback = useSendMealFeedback();
+  const seedHemc = useSeedHemcMerchants();
+
+  const toggleParty = (next: DiningPartyMode) => {
+    setParty((prev) => (prev === next ? undefined : next));
+    setExcludeByMeal((prev) => ({ ...prev, [meal]: [] }));
+  };
+
+  const togglePace = (next: DiningPaceMode) => {
+    setPace((prev) => (prev === next ? undefined : next));
+    setExcludeByMeal((prev) => ({ ...prev, [meal]: [] }));
+  };
+
+  const handleSeedHemc = () => {
+    seedHemc.mutate(undefined, {
+      onSuccess: (r) =>
+        toast.success(r.created ? `已导入 ${r.created} 家大学城默认商家，现在可以开挑啦` : '默认商家已全部导入'),
+      onError: (err) => toast.error(err instanceof ApiError ? err.message : '导入失败'),
+    });
+  };
 
   const viewingMerchant = useMemo(() => {
     if (!viewingId) return null;
@@ -73,6 +110,7 @@ export function FoodPage() {
   };
 
   const handleFeedback = (item: MealRecommendation, action: 'accepted' | 'skipped' | 'disliked') => {
+    hapticLight();
     feedback.mutate(
       { merchantId: item.merchant.id, meal, action },
       {
@@ -92,12 +130,19 @@ export function FoodPage() {
   };
 
   const handleRefreshBatch = () => {
+    hapticLight();
     const currentIds = recQuery.data?.items.map((i) => i.merchant.id) ?? [];
     if (currentIds.length === 0) {
       resetExcluded();
       return;
     }
     excludeCurrent(currentIds);
+  };
+
+  const onSwipeRecommend = (_: unknown, info: PanInfo) => {
+    if (info.offset.x < -70 && Math.abs(info.offset.x) > Math.abs(info.offset.y) * 1.4) {
+      handleRefreshBatch();
+    }
   };
 
   const openCreate = () => {
@@ -138,12 +183,13 @@ export function FoodPage() {
         }
       />
 
-      {/* 顶部双视图分段开关：默认聚焦「今日推荐」，避免长页面信息堆砌 */}
+      {/* 顶部三视图分段开关：今日推荐 / 口碑榜 / 商家库，把榜单优雅收拢到饮食中心 */}
       <div className="mb-4 flex items-center justify-between gap-3">
         <div className="glass-thin inline-flex rounded-full p-1">
           {(
             [
               { id: 'recommend', label: '今日推荐' },
+              { id: 'ranking', label: '口碑榜' },
               { id: 'directory', label: `商家库 (${totalMerchants})` },
             ] as const
           ).map((tab) => {
@@ -213,8 +259,23 @@ export function FoodPage() {
               )}
             </div>
 
+            {/* 真实校园就餐场景快选：无需额外配置，按当下人数与节奏即时调整排序 */}
+            <div className="no-scrollbar mt-3 flex items-center gap-1.5 overflow-x-auto pb-0.5">
+              {DINING_PARTY_MODES.map((mode) => (
+                <Chip key={mode} active={party === mode} onClick={() => toggleParty(mode)} className="shrink-0 text-xs">
+                  {DINING_PARTY_LABELS[mode]}
+                </Chip>
+              ))}
+              <span className="mx-0.5 h-3.5 w-px shrink-0 bg-current/15" aria-hidden />
+              {DINING_PACE_MODES.map((mode) => (
+                <Chip key={mode} active={pace === mode} onClick={() => togglePace(mode)} className="shrink-0 text-xs">
+                  {DINING_PACE_LABELS[mode]}
+                </Chip>
+              ))}
+            </div>
+
             {(rec?.weatherSummary || rec?.scheduleHint) && (
-              <div className="mt-3 flex flex-wrap gap-2 text-xs text-fg-muted">
+              <div className="mt-2.5 flex flex-wrap gap-2 text-xs text-fg-muted">
                 {rec.weatherSummary && (
                   <span className="surface-subtle rounded-full px-2.5 py-0.5">{rec.weatherSummary}</span>
                 )}
@@ -233,8 +294,12 @@ export function FoodPage() {
                 </div>
               ) : rec && rec.items.length > 0 ? (
                 <motion.div
-                  key={`${meal}-${excludeByMeal[meal].join(',')}`}
-                  className="grid gap-3 md:grid-cols-3"
+                  key={`${meal}-${party ?? ''}-${pace ?? ''}-${excludeByMeal[meal].join(',')}`}
+                  className="grid touch-pan-y gap-3 md:grid-cols-3"
+                  drag="x"
+                  dragConstraints={{ left: 0, right: 0 }}
+                  dragElastic={0.18}
+                  onDragEnd={onSwipeRecommend}
                   variants={stagger.container}
                   initial="hidden"
                   animate="show"
@@ -255,10 +320,21 @@ export function FoodPage() {
               ) : totalMerchants === 0 ? (
                 <div className="rounded-2xl border border-dashed border-current/20 p-6 text-center">
                   <p className="text-base font-medium">还没有收录商家</p>
-                  <p className="mt-1 text-sm text-fg-muted">添几家常去的食堂档口或贝岗小店，推荐就会立即可用</p>
-                  <Button className="mt-4 h-10 px-5 text-sm" onClick={openCreate}>
-                    录入第一家店
-                  </Button>
+                  <p className="mt-1 text-sm text-fg-muted">
+                    {campusId === 'hemc'
+                      ? '一键导入广工大学城一饭至四饭及南亭村常见店，或手动添一家你的私藏小店'
+                      : '添几家常去的食堂档口或周边小店，推荐就会立即可用'}
+                  </p>
+                  <div className="mt-4 flex flex-wrap justify-center gap-2">
+                    {campusId === 'hemc' && (
+                      <Button className="h-10 px-4 text-sm" loading={seedHemc.isPending} onClick={handleSeedHemc}>
+                        一键导入大学城默认商家库
+                      </Button>
+                    )}
+                    <Button variant={campusId === 'hemc' ? 'ghost' : 'primary'} className="h-10 px-4 text-sm" onClick={openCreate}>
+                      手动录入第一家店
+                    </Button>
+                  </div>
                 </div>
               ) : (
                 <div className="rounded-2xl border border-dashed border-current/20 p-6 text-center">
@@ -315,6 +391,8 @@ export function FoodPage() {
             </GlassCard>
           )}
         </div>
+      ) : view === 'ranking' ? (
+        <RankingContent onGoCreate={openCreate} />
       ) : (
         <GlassCard className="p-5">
           <div className="flex flex-wrap items-center justify-between gap-2">

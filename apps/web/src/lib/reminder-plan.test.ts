@@ -1,6 +1,6 @@
-import type { Todo } from '@gduthelp/shared';
+import type { TimetableData, Todo } from '@gduthelp/shared';
 import { describe, expect, it } from 'vitest';
-import { notificationId, planReminders, TEST_NOTIFICATION_ID } from './reminder-plan';
+import { notificationId, planClassReminders, planReminders, TEST_NOTIFICATION_ID } from './reminder-plan';
 
 const now = new Date('2026-11-20T02:00:00Z'); // 北京时间 10:00
 const iso = (minutesFromNow: number) => new Date(now.getTime() + minutesFromNow * 60_000).toISOString();
@@ -12,6 +12,7 @@ function todo(over: Partial<Todo> = {}): Todo {
     note: null,
     dueAt: iso(120),
     priority: 3,
+    repeat: 'none',
     completedAt: null,
     createdAt: iso(-60),
     reminders: [{ id: 'r1', offsetMinutes: 30, fireAt: iso(90), status: 'pending' }],
@@ -70,5 +71,33 @@ describe('notificationId', () => {
     expect(id).toBeGreaterThan(TEST_NOTIFICATION_ID);
     expect(id).toBeLessThanOrEqual(0x7fffffff);
     expect(notificationId('a')).not.toBe(notificationId('b'));
+  });
+});
+
+describe('planClassReminders', () => {
+  it('plans upcoming class reminders within 7 days', () => {
+    // 2026-09-07 为周一 08:00，第 1 节 08:30 开始，提前 15 分钟 = 08:15
+    const base = new Date('2026-09-07T08:00:00+08:00');
+    const tt: TimetableData = {
+      semester: { id: 's1', name: '2026秋', startDate: '2026-09-07', totalWeeks: 18 },
+      courses: [
+        {
+          id: 'c1',
+          name: '大学物理',
+          teacher: '李老师',
+          location: '教2-101',
+          color: '#64b5f6',
+          source: 'manual',
+          importKey: null,
+          slots: [{ id: 'sl1', weekday: 1, periodStart: 1, periodEnd: 2, weeks: [1, 2], location: null }],
+        },
+      ],
+    };
+    const plans = planClassReminders(tt, 'hemc', 15, base);
+    expect(plans.length).toBeGreaterThanOrEqual(1);
+    expect(plans[0]!.title).toBe('15 分钟后上课：大学物理');
+    expect(plans[0]!.body).toContain('08:30');
+    expect(plans[0]!.body).toContain('教2-101');
+    expect(plans[0]!.link).toBe('/timetable');
   });
 });

@@ -46,6 +46,7 @@ function setup() {
     },
     refreshToken: {
       findUnique: vi.fn(),
+      findMany: vi.fn().mockResolvedValue([]),
       create: vi.fn(),
       updateMany: vi.fn().mockResolvedValue({ count: 1 }),
     },
@@ -189,5 +190,94 @@ describe('AuthService.refresh', () => {
     prisma.refreshToken.findUnique.mockResolvedValue(null);
     await expectCode(service.refresh('raw'), ErrorCode.REFRESH_TOKEN_INVALID);
     await expectCode(service.refresh(undefined), ErrorCode.REFRESH_TOKEN_INVALID);
+  });
+
+  it('revokes overflow sessions when exceeding active device cap', async () => {
+    const { prisma, service } = setup();
+    prisma.emailCode.findFirst.mockResolvedValue({
+      id: 'c1',
+      codeHash: hashEmailCode(env.AUTH_CODE_SECRET, 'boss@example.com', '123456'),
+      attempts: 0,
+    });
+    prisma.refreshToken.findMany.mockResolvedValue([{ id: 'old-1' }, { id: 'old-2' }]);
+
+    await service.loginWithEmailCode('boss@example.com', '123456');
+
+    expect(prisma.refreshToken.updateMany).toHaveBeenCalledWith({
+      where: { id: { in: ['old-1', 'old-2'] }, revokedAt: null },
+      data: { revokedAt: expect.any(Date) },
+    });
+  });
+
+  it('revokes every refresh token on logoutAll', async () => {
+    const { prisma, service } = setup();
+    prisma.refreshToken.updateMany.mockResolvedValue({ count: 3 });
+
+    const res = await service.logoutAll('u1');
+    expect(res).toEqual({ revokedCount: 3 });
+    expect(prisma.refreshToken.updateMany).toHaveBeenCalledWith({
+      where: { userId: 'u1', revokedAt: null },
+      data: { revokedAt: expect.any(Date) },
+    });
+  });
+
+  it('supports password registration, password login, lockout on 5 failures, and domain/invite gates', async () => {
+    const restrictedEnv = loadEnv({
+      DATABASE_URL: 'postgres://unused',
+      JWT_SECRET: 'j'.repeat(32),
+      AUTH_CODE_SECRET: 'c'.repeat(32),
+      ADMIN_EMAILS: 'boss@example.com',
+      ALLOWED_EMAIL_DOMAINS: 'mail2.gdut.edu.cn',
+      INVITE_CODE: 'GDUT2026',
+    });
+
+    const { prisma, mail } = setup();
+    const jwt = new JwtService({ secret: restrictedEnv.JWT_SECRET });
+    const service = new AuthService(
+      prisma as unknown as PrismaService,
+      jwt,
+      mail as unknown as MailService,
+      restrictedEnv,
+    );
+
+    // 拦截非白名单邮箱
+    await expectCode(service.sendEmailCode('outsider@qq.com', '1.1.1.1', 'GDUT2026'), ErrorCode.FORBIDDEN);
+    // 拦截缺少正确邀请码的新同学
+    await expectCode(service.sendEmailCode('stu@mail2.gdut.edu.cn', '1.1.1.1', 'WRONG'), ErrorCode.FORBIDDEN);
+
+    // 校验验证码注册并设置密码
+    prisma.emailCode.findFirst.mockResolvedValue({
+      id: 'c2',
+      codeHash: hashEmailCode(restrictedEnv.AUTH_CODE_SECRET, 'stu@mail2.gdut.edu.cn', '654321'),
+      attempts: 0,
+    });
+    let savedHash = '';
+    prisma.user.create.mockImplementation(async ({ data }) => {
+      savedHash = data.passwordHash as string;
+      return user({ ...data, id: 'u-stu' });
+    });
+
+    const reg = await service.registerWithPassword({
+      email: 'stu@mail2.gdut.edu.cn',
+      code: '654321',
+      password: 'gdut-password-123',
+      nickname: '广工同学',
+      inviteCode: 'GDUT2026',
+    });
+    expect(reg.session.user.hasPassword).toBe(true);
+    expect(savedHash.startsWith('scrypt$')).toBe(true);
+
+    // 正确密码登录成功
+    prisma.user.findUnique.mockResolvedValue(
+      user({ id: 'u-stu', email: 'stu@mail2.gdut.edu.cn', passwordHash: savedHash }),
+    );
+    const logged = await service.loginWithPassword('stu@mail2.gdut.edu.cn', 'gdut-password-123');
+    expect(logged.session.user.id).toBe('u-stu');
+
+    // 连续 5 次错误密码后触发锁定
+    for (let i = 0; i < AUTH_LIMITS.maxPasswordFailures; i++) {
+      await expectCode(service.loginWithPassword('stu@mail2.gdut.edu.cn', 'wrong-pwd'), ErrorCode.UNAUTHORIZED);
+    }
+    await expectCode(service.loginWithPassword('stu@mail2.gdut.edu.cn', 'gdut-password-123'), ErrorCode.TOO_MANY_REQUESTS);
   });
 });

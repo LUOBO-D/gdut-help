@@ -4,10 +4,13 @@ import {
   MAX_REMINDERS,
   PRIORITY_LABEL,
   reminderFireAt,
+  TODO_REPEAT_LABELS,
+  TODO_REPEATS,
   todoInputSchema,
   type ReminderInput,
   type Todo,
   type TodoInput,
+  type TodoRepeat,
 } from '@gduthelp/shared';
 import { useState } from 'react';
 import { Button } from '../../components/Button';
@@ -52,6 +55,7 @@ function TodoForm({ todo, onDone }: { todo: Todo | null; onDone: () => void }) {
   const [note, setNote] = useState(todo?.note ?? '');
   const [due, setDue] = useState(toLocalInput(todo?.dueAt));
   const [priority, setPriority] = useState(todo?.priority ?? 3);
+  const [repeat, setRepeat] = useState<TodoRepeat>(todo?.repeat ?? 'none');
   const pending = todo?.reminders.filter((r) => r.status !== 'cancelled') ?? [];
   const [offsets, setOffsets] = useState<number[]>(
     todo ? pending.filter((r) => r.offsetMinutes !== null).map((r) => r.offsetMinutes!) : [0],
@@ -86,7 +90,7 @@ function TodoForm({ todo, onDone }: { todo: Todo | null; onDone: () => void }) {
   const sentTimes = new Set(todo?.reminders.filter((r) => r.status === 'sent').map((r) => r.fireAt));
 
   const submit = () => {
-    const input: TodoInput = { title, note: note || null, dueAt: dueIso, priority, reminders };
+    const input: TodoInput = { title, note: note || null, dueAt: dueIso, priority, repeat, reminders };
     const parsed = todoInputSchema.safeParse(input);
     if (!parsed.success) return setError(parsed.error.issues[0]?.message ?? '请检查填写的内容');
     setError(null);
@@ -115,14 +119,26 @@ function TodoForm({ todo, onDone }: { todo: Todo | null; onDone: () => void }) {
         )}
       </div>
 
-      <div>
-        <p className="mb-1.5 text-sm text-fg-muted">优先级</p>
-        <div className="flex gap-1.5">
-          {[1, 2, 3, 4].map((p) => (
-            <Chip key={p} active={priority === p} onClick={() => setPriority(p)}>
-              {PRIORITY_LABEL[p]}
-            </Chip>
-          ))}
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+        <div>
+          <p className="mb-1.5 text-sm text-fg-muted">优先级</p>
+          <div className="flex flex-wrap gap-1.5">
+            {[1, 2, 3, 4].map((p) => (
+              <Chip key={p} active={priority === p} onClick={() => setPriority(p)}>
+                {PRIORITY_LABEL[p]}
+              </Chip>
+            ))}
+          </div>
+        </div>
+        <div>
+          <p className="mb-1.5 text-sm text-fg-muted">重复周期</p>
+          <div className="flex flex-wrap gap-1.5">
+            {TODO_REPEATS.map((r) => (
+              <Chip key={r} active={repeat === r} onClick={() => setRepeat(r)}>
+                {TODO_REPEAT_LABELS[r]}
+              </Chip>
+            ))}
+          </div>
         </div>
       </div>
 

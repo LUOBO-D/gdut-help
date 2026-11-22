@@ -24,7 +24,7 @@ pnpm dev            # http://localhost:5173
 
 完整步骤（不装 Docker 的方案、验证码在哪看、手机通过 Tailscale 访问）见 [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)。
 
-当前进度：自用版 S0–S4 已全部完成（基础搭建、3D 天空、天气 / 课表 / 待办与智能提醒、吃什么与 DeepSeek 润色、评分与贝叶斯榜单），见 [开发路线](docs/05-roadmap.md)。
+当前进度：自用版 S0–S4 及综合深化优化（课前提醒、重复待办与中文识时间、大学城默认商家种子包、6 位课表分享码、离线待办队列、多端会话与数据导出注销、真实数据库 E2E 测试、单容器 7×24 云部署）已全部落地，见 [开发路线](docs/05-roadmap.md) 与 [部署指南](docs/DEPLOYMENT.md)。
 
 ## 文档目录
 
@@ -36,6 +36,7 @@ pnpm dev            # http://localhost:5173
 | [04-frontend.md](docs/04-frontend.md) | 前端工程方案、UI 视觉与动效设计、性能分级 |
 | [05-roadmap.md](docs/05-roadmap.md) | 开发阶段、风险与合规、待确认问题 |
 | [DEVELOPMENT.md](docs/DEVELOPMENT.md) | 本地开发环境、常用命令、接口约定 |
+| [DEPLOYMENT.md](docs/DEPLOYMENT.md) | 7×24 云端自用单容器部署、Tailscale 接入与自动备份 |
 
 ## 数据与第三方服务
 

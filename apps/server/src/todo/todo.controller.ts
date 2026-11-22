@@ -1,5 +1,5 @@
 import { Body, Controller, Delete, Get, HttpCode, Param, Post, Put } from '@nestjs/common';
-import { todoInputSchema, type Todo } from '@gduthelp/shared';
+import { todoInputSchema, type Todo, type TodoCompleteResult } from '@gduthelp/shared';
 import { z } from 'zod';
 import { CurrentUser, type AuthUser } from '../auth/auth.decorators.js';
 import { TodoService } from './todo.service.js';
@@ -32,13 +32,13 @@ export class TodoController {
 
   @Post(':id/complete')
   @HttpCode(200)
-  complete(@CurrentUser() user: AuthUser, @Param('id', { schema: idParam }) id: string): Promise<Todo> {
+  complete(@CurrentUser() user: AuthUser, @Param('id', { schema: idParam }) id: string): Promise<TodoCompleteResult> {
     return this.todos.setCompleted(user.id, id, true);
   }
 
   @Post(':id/reopen')
   @HttpCode(200)
-  reopen(@CurrentUser() user: AuthUser, @Param('id', { schema: idParam }) id: string): Promise<Todo> {
+  reopen(@CurrentUser() user: AuthUser, @Param('id', { schema: idParam }) id: string): Promise<TodoCompleteResult> {
     return this.todos.setCompleted(user.id, id, false);
   }
 

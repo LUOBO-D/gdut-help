@@ -2,7 +2,9 @@ import { HttpStatus, Inject, Injectable } from '@nestjs/common';
 import {
   DEFAULT_CAMPUS_ID,
   ErrorCode,
+  HEMC_SEED_MERCHANTS,
   findSimilarMerchants,
+  normalizeMerchantName,
   type Dish,
   type DishInput,
   type Merchant,
@@ -11,6 +13,7 @@ import {
   type MerchantOpenHours,
   type MerchantStatus,
   type MerchantUpdateInput,
+  type SeedImportResult,
   type SimilarMerchant,
 } from '@gduthelp/shared';
 import type { AuthUser } from '../auth/auth.decorators.js';
@@ -287,5 +290,63 @@ export class MerchantService {
       include: INCLUDE_DISHES,
     });
     return toMerchant(row);
+  }
+
+  /**
+   * 一键导入广工大学城（hemc）默认种子商家包（按归一化名称幂等去重，不覆盖已有店铺）。
+   * 管理员随时可导入补齐；自用模式（MERCHANT_AUTO_APPROVE=true）下商家库为空时普通用户也可一键初始化。
+   */
+  async seedHemcDefault(user: AuthUser): Promise<SeedImportResult> {
+    const existing = await this.prisma.merchant.findMany({
+      where: { campusId: 'hemc', status: { not: 'rejected' } },
+      select: { name: true },
+    });
+    if (user.role !== 'admin' && (!this.env.MERCHANT_AUTO_APPROVE || existing.length > 0)) {
+      throw new AppException(ErrorCode.FORBIDDEN, '仅管理员或空商家库冷启动时可导入默认商家包', HttpStatus.FORBIDDEN);
+    }
+
+    const existingNames = new Set(existing.map((e) => normalizeMerchantName(e.name)));
+    let created = 0;
+    let skipped = 0;
+
+    await this.prisma.$transaction(async (tx) => {
+      for (const item of HEMC_SEED_MERCHANTS) {
+        const key = normalizeMerchantName(item.name);
+        if (existingNames.has(key)) {
+          skipped++;
+          continue;
+        }
+        existingNames.add(key);
+        await tx.merchant.create({
+          data: {
+            name: item.name,
+            category: item.category,
+            campusId: item.campusId,
+            locationText: item.locationText,
+            walkMinutes: item.walkMinutes ?? null,
+            priceAvg: item.priceAvg,
+            tags: item.tags,
+            openHours: serializeOpenHours(item.openMeals, item.openHoursText),
+            submittedBy: user.id,
+            status: 'approved',
+            ...(item.dishes?.length
+              ? {
+                  dishes: {
+                    create: item.dishes.map((d) => ({
+                      name: d.name,
+                      price: d.price ?? null,
+                      tags: d.tags,
+                      submittedBy: user.id,
+                    })),
+                  },
+                }
+              : {}),
+          },
+        });
+        created++;
+      }
+    });
+
+    return { created, skipped, total: HEMC_SEED_MERCHANTS.length };
   }
 }

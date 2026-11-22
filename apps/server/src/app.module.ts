@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { APP_GUARD } from '@nestjs/core';
 import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
+import { AppUpdateModule } from './app-update/app-update.module.js';
 import { AuthModule } from './auth/auth.module.js';
 import { AppConfigModule } from './config/config.module.js';
 import { HealthController } from './health/health.controller.js';
@@ -22,6 +23,7 @@ import { WeatherModule } from './weather/weather.module.js';
     ThrottlerModule.forRoot([{ ttl: 60_000, limit: 120 }]),
     PrismaModule,
     MailModule,
+    AppUpdateModule,
     AuthModule,
     UsersModule,
     WeatherModule,

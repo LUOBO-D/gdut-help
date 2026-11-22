@@ -11,6 +11,7 @@ import {
   type Merchant,
   type MerchantInput,
   type MerchantUpdateInput,
+  type SeedImportResult,
   type SimilarMerchant,
 } from '@gduthelp/shared';
 import { z } from 'zod';
@@ -48,6 +49,13 @@ export class MerchantController {
   @Get('merchants/similar')
   similar(@Query({ schema: similarQuerySchema }) q: z.output<typeof similarQuerySchema>): Promise<SimilarMerchant[]> {
     return this.merchants.findSimilar(q);
+  }
+
+  @Post('merchants/seed-hemc')
+  @HttpCode(200)
+  @Throttle({ default: { limit: 5, ttl: 60_000 } })
+  seedHemc(@CurrentUser() user: AuthUser): Promise<SeedImportResult> {
+    return this.merchants.seedHemcDefault(user);
   }
 
   @Get('merchants/:id')

@@ -1,6 +1,7 @@
 import { AnimatePresence, motion, useDragControls } from 'motion/react';
 import { useEffect, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
+import { pushSheet } from '../lib/sheet-stack';
 import { spring } from '../motion/presets';
 import { XIcon } from './icons';
 
@@ -22,11 +23,13 @@ export function Sheet({ open, onClose, title, children, footer }: SheetProps) {
 
   useEffect(() => {
     if (!open) return;
+    const pop = pushSheet(onClose);
     const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
     const prev = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
     window.addEventListener('keydown', onKey);
     return () => {
+      pop();
       document.body.style.overflow = prev;
       window.removeEventListener('keydown', onKey);
     };

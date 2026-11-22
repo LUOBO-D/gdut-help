@@ -9,22 +9,78 @@ const email = z
   .toLowerCase()
   .pipe(z.email({ error: '邮箱格式不正确' }).max(254));
 
-export const emailCodeRequestSchema = z.object({ email });
-export type EmailCodeRequest = z.infer<typeof emailCodeRequestSchema>;
+const code = z
+  .string()
+  .trim()
+  .regex(new RegExp(`^\\d{${EMAIL_CODE_LENGTH}}$`), {
+    error: `验证码为 ${EMAIL_CODE_LENGTH} 位数字`,
+  });
 
-export const loginRequestSchema = z.object({
+export const passwordSchema = z
+  .string()
+  .min(8, { error: '密码至少 8 位' })
+  .max(72, { error: '密码最多 72 位' });
+
+const optionalInviteCode = z
+  .string()
+  .trim()
+  .max(32)
+  .optional()
+  .transform((v) => (v && v.length > 0 ? v : undefined));
+
+export const emailCodeRequestSchema = z.object({ email, inviteCode: optionalInviteCode });
+export type EmailCodeRequest = z.input<typeof emailCodeRequestSchema>;
+
+export const loginRequestSchema = z.object({ email, code, inviteCode: optionalInviteCode });
+export type LoginRequest = z.input<typeof loginRequestSchema>;
+
+export const passwordLoginRequestSchema = z.object({
   email,
-  code: z
+  password: z.string().min(1, { error: '请输入密码' }).max(72),
+});
+export type PasswordLoginRequest = z.infer<typeof passwordLoginRequestSchema>;
+
+export const registerWithPasswordSchema = z.object({
+  email,
+  code,
+  password: passwordSchema,
+  nickname: z
     .string()
     .trim()
-    .regex(new RegExp(`^\\d{${EMAIL_CODE_LENGTH}}$`), {
-      error: `验证码为 ${EMAIL_CODE_LENGTH} 位数字`,
-    }),
+    .min(1, { error: '昵称不能为空' })
+    .max(20, { error: '昵称最多 20 个字' })
+    .optional(),
+  inviteCode: optionalInviteCode,
 });
-export type LoginRequest = z.infer<typeof loginRequestSchema>;
+export type RegisterWithPasswordRequest = z.input<typeof registerWithPasswordSchema>;
+
+export const resetPasswordSchema = z.object({
+  email,
+  code,
+  newPassword: passwordSchema,
+});
+export type ResetPasswordRequest = z.infer<typeof resetPasswordSchema>;
+
+export const changePasswordSchema = z.object({
+  currentPassword: z.string().min(1).max(72).optional(),
+  newPassword: passwordSchema,
+});
+export type ChangePasswordRequest = z.infer<typeof changePasswordSchema>;
+
+export interface AuthConfig {
+  /** 允许注册/登录的邮箱后缀白名单（空数组表示不限制，QQ/163/校内邮箱均可） */
+  allowedEmailDomains: string[];
+  /** 新用户注册是否需要邀请码 */
+  inviteRequired: boolean;
+  /** 当前发信模式：console 表示本地开发日志输出验证码，smtp 表示真实发信 */
+  mailDriver: 'console' | 'smtp';
+}
 
 export const userRoleSchema = z.enum(['user', 'admin']);
 export type UserRole = z.infer<typeof userRoleSchema>;
+
+export const CLASS_REMIND_OPTIONS = [0, 10, 15, 20] as const;
+export type ClassRemindMinutes = (typeof CLASS_REMIND_OPTIONS)[number];
 
 export interface UserProfile {
   id: string;
@@ -35,6 +91,8 @@ export interface UserProfile {
   campusId: string | null;
   remindByEmail: boolean;
   remindMeal: boolean;
+  classRemindMinutes: number;
+  hasPassword: boolean;
   createdAt: string;
 }
 
@@ -44,6 +102,12 @@ export const updateProfileSchema = z
     campusId: z.string().refine((id) => CAMPUSES.some((c) => c.id === id), { error: '未知校区' }),
     remindByEmail: z.boolean(),
     remindMeal: z.boolean(),
+    classRemindMinutes: z
+      .number()
+      .int()
+      .refine((v) => (CLASS_REMIND_OPTIONS as readonly number[]).includes(v), {
+        error: '课前提醒仅支持关闭或提前 10 / 15 / 20 分钟',
+      }),
   })
   .partial();
 export type UpdateProfileRequest = z.infer<typeof updateProfileSchema>;
@@ -64,4 +128,56 @@ export type NativeRefreshRequest = z.infer<typeof nativeRefreshSchema>;
 export interface EmailCodeSent {
   /** 下次可重新发送的秒数 */
   cooldownSeconds: number;
+}
+
+export interface LogoutAllResult {
+  revokedCount: number;
+}
+
+export const deleteAccountSchema = z.object({
+  confirmEmail: email,
+});
+export type DeleteAccountRequest = z.infer<typeof deleteAccountSchema>;
+
+export interface UserDataExport {
+  exportedAt: string;
+  profile: UserProfile;
+  preference: {
+    tastes: string[];
+    dislikes: string[];
+    budgetMin: number | null;
+    budgetMax: number | null;
+  } | null;
+  courses: {
+    name: string;
+    semester: string;
+    teacher: string | null;
+    location: string | null;
+    source: string;
+    slots: { weekday: number; periodStart: number; periodEnd: number; weeks: number[]; location: string | null }[];
+  }[];
+  todos: {
+    title: string;
+    note: string | null;
+    dueAt: string | null;
+    priority: number;
+    repeat: string;
+    completedAt: string | null;
+    createdAt: string;
+  }[];
+  moodLogs: {
+    date: string;
+    mood: string;
+    note: string | null;
+  }[];
+  reviews: {
+    merchantName: string;
+    scoreTaste: number;
+    scoreValue: number;
+    scoreEnv: number;
+    scoreSpeed: number;
+    scoreOverall: number;
+    content: string;
+    createdAt: string;
+  }[];
 }

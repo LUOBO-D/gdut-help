@@ -1,5 +1,6 @@
 import {
   DEFAULT_CAMPUS_ID,
+  type DiningContext,
   type MealFeedback,
   type MealRecommendationResponse,
   type MealType,
@@ -27,7 +28,8 @@ export const keys = {
   notifications: ['notifications'] as const,
   preferences: ['preferences'] as const,
   moodToday: ['mood', 'today'] as const,
-  recommendations: (meal: MealType, exclude: string[]) => ['recommend', 'meals', meal, exclude.join(',')] as const,
+  recommendations: (meal: MealType, exclude: string[], ctx?: DiningContext) =>
+    ['recommend', 'meals', meal, exclude.join(','), ctx?.party ?? '', ctx?.pace ?? ''] as const,
   recommendationsPrefix: ['recommend', 'meals'] as const,
   merchants: (campusId: string, category?: MerchantCategory, q?: string) => ['merchants', campusId, category ?? '', q ?? ''] as const,
   merchantsPrefix: ['merchants'] as const,
@@ -93,11 +95,13 @@ export function useTodayMood() {
   });
 }
 
-export function useMealRecommendations(meal: MealType, excludeIds: string[] = []) {
+export function useMealRecommendations(meal: MealType, excludeIds: string[] = [], context?: DiningContext) {
   const qs = new URLSearchParams({ meal });
   if (excludeIds.length) qs.set('exclude', excludeIds.join(','));
+  if (context?.party) qs.set('party', context.party);
+  if (context?.pace) qs.set('pace', context.pace);
   return useQuery({
-    queryKey: keys.recommendations(meal, excludeIds),
+    queryKey: keys.recommendations(meal, excludeIds, context),
     queryFn: () => api<MealRecommendationResponse>(`/recommend/meals?${qs.toString()}`),
     enabled: useLoggedIn(),
     staleTime: 2 * 60_000,

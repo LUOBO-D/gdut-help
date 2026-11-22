@@ -1,13 +1,15 @@
-import type { DeliveryResult } from '@gduthelp/shared';
+import { CLASS_REMIND_OPTIONS, type DeliveryResult } from '@gduthelp/shared';
 import { useMutation } from '@tanstack/react-query';
 import { lazy, Suspense, useEffect, useState } from 'react';
 import { Button } from '../../components/Button';
+import { Chip } from '../../components/Field';
 import { GlassCard } from '../../components/GlassCard';
 import { Switch } from '../../components/Switch';
 import { api, ApiError } from '../../lib/api';
 import { useAuth } from '../../lib/auth-store';
 import { isNative } from '../../lib/platform';
 import { disablePush, enablePush, PUSH_STATE_TEXT, pushState, type PushState } from '../../lib/push';
+import { toast } from '../../lib/toast-store';
 import { useUpdateProfile } from './useUpdateProfile';
 
 // 只有 App 里才加载，网页端不下载本地通知插件
@@ -22,6 +24,7 @@ function describe(r: DeliveryResult): string {
 export function ReminderSettings() {
   const remindByEmail = useAuth((s) => s.user?.remindByEmail ?? true);
   const remindMeal = useAuth((s) => s.user?.remindMeal ?? false);
+  const classRemindMinutes = useAuth((s) => s.user?.classRemindMinutes ?? 0);
   const email = useAuth((s) => s.user?.email);
   const update = useUpdateProfile();
   const [push, setPush] = useState<PushState | null>(null);
@@ -46,10 +49,20 @@ export function ReminderSettings() {
   };
   const canToggle = push === 'enabled' || push === 'disabled';
 
+  const setClassRemind = (mins: number) => {
+    if (mins === classRemindMinutes) return;
+    update.mutate(
+      { classRemindMinutes: mins },
+      {
+        onSuccess: () => toast.success(mins ? `已开启课前 ${mins} 分钟提醒` : '已关闭课前提醒'),
+      },
+    );
+  };
+
   return (
     <GlassCard className="p-5">
       <h2 className="text-[15px] font-semibold">提醒设置</h2>
-      <p className="mt-1 text-sm text-fg-muted">待办到点时，会同时写入站内通知（今天页右上角的铃铛）</p>
+      <p className="mt-1 text-sm text-fg-muted">待办与课前提醒到点时，会写入站内通知并同步到本地/推送渠道</p>
       <div className="mt-3 divide-y divide-current/10">
         {isNative ? (
           <Suspense fallback={<p className="py-3 text-sm text-fg-muted">检测中…</p>}>
@@ -79,6 +92,19 @@ export function ReminderSettings() {
           checked={remindMeal}
           onChange={(v) => update.mutate({ remindMeal: v })}
         />
+        <div className="py-3">
+          <p className="text-[15px] font-medium">课前自动提醒</p>
+          <p className="mt-0.5 text-xs text-fg-muted">
+            {isNative ? '提前写入手机本地通知，断网也能提醒教室和节次' : '上课前通过站内通知 / 浏览器推送 / 邮件提醒教室与节次'}
+          </p>
+          <div className="mt-2.5 flex flex-wrap gap-1.5">
+            {CLASS_REMIND_OPTIONS.map((mins) => (
+              <Chip key={mins} active={classRemindMinutes === mins} onClick={() => setClassRemind(mins)} className="text-xs">
+                {mins === 0 ? '关闭' : `提前 ${mins} 分钟`}
+              </Chip>
+            ))}
+          </div>
+        </div>
       </div>
       <Button variant="ghost" className="mt-3 w-full" loading={test.isPending} onClick={() => test.mutate()}>
         发送一条测试提醒

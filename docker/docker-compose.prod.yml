@@ -1,0 +1,61 @@
+# 生产级 7x24 自用部署编排：PostgreSQL 16 + 自动迁移 + GDUT Help 单容器（前后端一体）
+# 默认仅监听 127.0.0.1:3000，配合 Tailscale Serve 或本机 Nginx 提供 HTTPS，不直接暴露公网端口。
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-gduthelp}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?请在 docker/.env.prod 中设置 POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB:-gduthelp}
+      TZ: Asia/Shanghai
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-gduthelp} -d ${POSTGRES_DB:-gduthelp}"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
+  migrator:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+      target: migrator
+    restart: "no"
+    env_file:
+      - .env.prod
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-gduthelp}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-gduthelp}?schema=public
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  app:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+      target: runner
+    restart: unless-stopped
+    env_file:
+      - .env.prod
+    environment:
+      NODE_ENV: production
+      HOST: 0.0.0.0
+      PORT: 3000
+      STATIC_DIR: /app/public
+      OTA_DIR: /app/ota-bundles
+      DATABASE_URL: postgresql://${POSTGRES_USER:-gduthelp}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-gduthelp}?schema=public
+    volumes:
+      - ./ota-bundles:/app/ota-bundles
+    ports:
+      - "127.0.0.1:${APP_PORT:-3000}:3000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrator:
+        condition: service_completed_successfully
+
+volumes:
+  pgdata:

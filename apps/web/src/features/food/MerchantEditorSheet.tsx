@@ -22,7 +22,7 @@ import { toast } from '../../lib/toast-store';
 import { useCreateMerchant, useDeleteMerchant, useUpdateMerchant } from './mutations';
 
 /** 大学城校区高频位置快捷填选，减少手机打字 */
-const LOCATION_PRESETS = ['一饭', '二饭', '三饭', '四饭', '东区食堂', '西区食堂', '贝岗村', 'GOGO新天地'] as const;
+const LOCATION_PRESETS = ['一饭', '二饭', '三饭', '四饭', '东区食堂', '西区食堂', '南亭村', 'GOGO新天地'] as const;
 
 interface MerchantEditorSheetProps {
   open: boolean;
@@ -239,7 +239,7 @@ function MerchantEditorSheetInner({ open, onClose, editing, onPickSimilar }: Mer
         <Field label="位置描述">
           <input
             className="field"
-            placeholder="如：二饭三楼靠窗 / 贝岗村北门"
+            placeholder="如：二饭三楼靠窗 / 南亭村商业街"
             maxLength={80}
             value={locationText}
             onChange={(e) => setLocationText(e.target.value)}

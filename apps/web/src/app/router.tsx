@@ -1,10 +1,11 @@
 import { createBrowserRouter, Navigate } from 'react-router';
 import { TodayPage } from '../features/today/TodayPage';
 import { AppShell } from './AppShell';
+import { MapShell } from './MapShell';
 import { RequireAuth } from './RequireAuth';
 import { RootLayout } from './RootLayout';
 
-// 只有首页随主包加载；其他页面（包括登录页）按需加载，控制首屏 JS 体积
+// 只有首页随主包加载；其他页面（包括登录页、3D 校园地图）按需加载，控制首屏 JS 体积
 export const router = createBrowserRouter([
   {
     Component: RootLayout,
@@ -12,6 +13,12 @@ export const router = createBrowserRouter([
     HydrateFallback: () => null,
     children: [
       { path: '/login', lazy: () => import('../features/auth/LoginPage').then((m) => ({ Component: m.LoginPage })) },
+      {
+        Component: MapShell,
+        children: [
+          { path: 'map', lazy: () => import('../features/map/MapPage').then((m) => ({ Component: m.MapPage })) },
+        ],
+      },
       {
         Component: RequireAuth,
         children: [

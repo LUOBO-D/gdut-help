@@ -36,6 +36,36 @@ const WMO_TEXT: Record<number, string> = {
 
 export const wmoText = (code: number) => WMO_TEXT[code] ?? '未知';
 
+/** MET Norway symbol_code → 场景 */
+export function metNoScene(symbol: string, isNight: boolean): WeatherScene {
+  const s = symbol.toLowerCase();
+  if (s.includes('thunder')) return 'thunder';
+  if (s.includes('snow') || s.includes('sleet')) return 'snow';
+  if (s.includes('rain')) return 'rain';
+  if (s.includes('fog')) return 'fog';
+  if (s.startsWith('cloudy')) return 'cloudy';
+  if (s.includes('_night') || isNight) return 'night';
+  if (s.startsWith('clearsky') || s.startsWith('fair')) return 'sunny';
+  return 'cloudy';
+}
+
+export function metNoText(symbol: string): string {
+  const s = symbol.toLowerCase();
+  if (s.includes('thunder')) return '雷阵雨';
+  if (s.includes('heavysnow')) return '大雪';
+  if (s.includes('snow')) return '小雪';
+  if (s.includes('sleet')) return '雨夹雪';
+  if (s.includes('heavyrain')) return '大雨';
+  if (s.includes('lightrain')) return '小雨';
+  if (s.includes('rainshowers')) return '阵雨';
+  if (s.includes('rain')) return '中雨';
+  if (s.includes('fog')) return '雾';
+  if (s.startsWith('cloudy')) return '阴';
+  if (s.startsWith('partlycloudy')) return '多云';
+  if (s.startsWith('fair') || s.startsWith('clearsky')) return '晴';
+  return '多云';
+}
+
 /** 是否处于日落到日出之间。没有日出日落数据时按 6–18 点粗略判断 */
 export function isNightAt(at: Date, sunrise: string | null, sunset: string | null): boolean {
   if (sunrise && sunset) {

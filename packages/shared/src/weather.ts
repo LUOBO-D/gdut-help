@@ -30,7 +30,7 @@ export interface WeatherToday {
 }
 
 export interface WeatherReport {
-  source: 'qweather' | 'open-meteo';
+  source: 'qweather' | 'open-meteo' | 'met-no';
   /** 地点名称，如「广州·番禺」 */
   location: string;
   /** 数据获取时间 */

@@ -1,37 +1,64 @@
 /**
- * App 端：把待办提醒写成手机的本地通知。
+ * App 端：把待办提醒与课前提醒写成手机的本地通知。
  *
  * 到点由安卓系统直接弹出，不经过任何推送服务，电脑关机或手机断网也照常提醒。
- * 每次待办列表有变化（打开 App、回到前台、增删改待办）就整体重排一次：
+ * 每次待办、课表或课前提醒设置变化（打开 App、回到前台、增删改）就整体重排一次：
  * 取消之前排好的全部通知，再按最新数据重新排。这样不用逐条比对，结果总是和服务端一致。
  *
  * 只有 App 里会加载这个模块（见 main.tsx），网页端不受影响。
  */
-import type { Todo } from '@gduthelp/shared';
+import type { TimetableData, Todo } from '@gduthelp/shared';
 import { LocalNotifications, type LocalNotificationSchema } from '@capacitor/local-notifications';
 import type { QueryClient } from '@tanstack/react-query';
+import { useAuth } from './auth-store';
 import { keys } from './queries';
-import { planReminders, TEST_NOTIFICATION_ID } from './reminder-plan';
+import { planAllReminders, TEST_NOTIFICATION_ID } from './reminder-plan';
 
 export const CHANNEL_ID = 'todo-reminders';
 export { TEST_NOTIFICATION_ID };
 
+interface SyncPayload {
+  todos: Todo[];
+  timetable?: TimetableData;
+  campusId?: string | null;
+  classRemindMinutes: number;
+}
 
 let queue: Promise<void> = Promise.resolve();
 
-/** 按最新的待办列表重排本地通知。连续调用会排队执行，不会交错 */
-export function syncLocalReminders(todos: Todo[]): Promise<void> {
-  queue = queue.then(() => doSync(todos)).catch((err: unknown) => console.warn('本地提醒同步失败', err));
+/** 按最新的待办与课表重排本地通知。连续调用会排队执行，不会交错 */
+export function syncLocalReminders(todos: Todo[], extra?: Omit<SyncPayload, 'todos'>): Promise<void> {
+  const user = useAuth.getState().user;
+  const payload: SyncPayload = {
+    todos,
+    timetable: extra?.timetable,
+    campusId: extra?.campusId ?? user?.campusId ?? null,
+    classRemindMinutes: extra?.classRemindMinutes ?? user?.classRemindMinutes ?? 0,
+  };
+  queue = queue.then(() => doSync(payload)).catch((err: unknown) => console.warn('本地提醒同步失败', err));
   return queue;
 }
 
-async function doSync(todos: Todo[]) {
+/** 立即从 QueryClient 和当前用户状态重排本地通知（供 App 回到前台时调用） */
+export function resyncLocalReminders(queryClient: QueryClient): Promise<void> {
+  const todos = queryClient.getQueryData<Todo[]>(keys.todos) ?? [];
+  const timetable = queryClient.getQueryData<TimetableData>(keys.timetable);
+  const user = useAuth.getState().user;
+  if (!user) return Promise.resolve();
+  return syncLocalReminders(todos, {
+    timetable,
+    campusId: user.campusId,
+    classRemindMinutes: user.classRemindMinutes,
+  });
+}
+
+async function doSync(payload: SyncPayload) {
   const { display } = await LocalNotifications.checkPermissions();
   // 还没授权时不排（schedule 会自动弹授权框，打断用户）。授权在「我的 → 提醒设置」里引导
   if (display !== 'granted') return;
   const pending = (await LocalNotifications.getPending()).notifications.filter((n) => n.id !== TEST_NOTIFICATION_ID);
   if (pending.length) await LocalNotifications.cancel({ notifications: pending.map((n) => ({ id: n.id })) });
-  const planned = planReminders(todos, new Date());
+  const planned = planAllReminders({ ...payload, now: new Date() });
   if (!planned.length) return;
   const notifications: LocalNotificationSchema[] = planned.map((p) => ({
     id: p.id,
@@ -41,33 +68,47 @@ async function doSync(todos: Todo[]) {
     channelId: CHANNEL_ID,
     smallIcon: 'ic_stat_notify',
     schedule: { at: p.at, allowWhileIdle: true },
-    extra: { link: '/todo', todoId: p.todoId },
+    extra: { link: p.link ?? '/todo', todoId: p.todoId },
   }));
   await LocalNotifications.schedule({ notifications });
 }
 
-/** 启动时调用一次：建通知渠道、监听待办缓存变化、处理点击通知 */
+/** 启动时调用一次：建通知渠道、监听待办/课表/提醒设置变化、处理点击通知 */
 export async function initLocalReminders(queryClient: QueryClient, router: { navigate: (to: string) => unknown }) {
   await LocalNotifications.createChannel({
     id: CHANNEL_ID,
-    name: '待办提醒',
-    description: '待办到点时提醒',
+    name: '待办与课前提醒',
+    description: '待办到点与上课前提醒',
     importance: 5,
     visibility: 1,
     vibration: true,
   });
 
-  let last: Todo[] | undefined;
-  const sync = () => {
+  let lastSig = '';
+  const sync = (force = false) => {
     const todos = queryClient.getQueryData<Todo[]>(keys.todos);
-    if (!todos || todos === last) return;
-    last = todos;
-    void syncLocalReminders(todos);
+    const timetable = queryClient.getQueryData<TimetableData>(keys.timetable);
+    const user = useAuth.getState().user;
+    if (!user || (!todos && !timetable)) return;
+    const sig = `${user.id}:${user.campusId ?? ''}:${user.classRemindMinutes}:${todos?.length ?? -1}:${timetable?.courses.length ?? -1}`;
+    if (!force && sig === lastSig) return;
+    lastSig = sig;
+    void syncLocalReminders(todos ?? [], {
+      timetable,
+      campusId: user.campusId,
+      classRemindMinutes: user.classRemindMinutes,
+    });
   };
   queryClient.getQueryCache().subscribe((event) => {
-    if (event.type === 'updated' && event.query.queryKey[0] === keys.todos[0]) sync();
+    if (
+      event.type === 'updated' &&
+      (event.query.queryKey[0] === keys.todos[0] || event.query.queryKey[0] === keys.timetable[0])
+    ) {
+      sync(true);
+    }
   });
-  sync();
+  useAuth.subscribe(() => sync(false));
+  sync(true);
 
   await LocalNotifications.addListener('localNotificationActionPerformed', ({ notification }) => {
     const link = (notification.extra as { link?: string } | undefined)?.link;

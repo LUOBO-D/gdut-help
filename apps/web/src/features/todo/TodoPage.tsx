@@ -1,4 +1,12 @@
-import { dayOffset, formatWhen, PRIORITY_LABEL, type Todo } from '@gduthelp/shared';
+import {
+  dayOffset,
+  formatWhen,
+  parseQuickTodo,
+  PRIORITY_LABEL,
+  TODO_REPEAT_LABELS,
+  type ReminderInput,
+  type Todo,
+} from '@gduthelp/shared';
 import { AnimatePresence, motion } from 'motion/react';
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { useSearchParams } from 'react-router';
@@ -46,8 +54,12 @@ export function TodoPage() {
   const quickInputRef = useRef<HTMLInputElement>(null);
 
   const [quickTitle, setQuickTitle] = useState('');
+  const [disableQuickParse, setDisableQuickParse] = useState(false);
   const [editing, setEditing] = useState<Todo | null>(null);
   const [open, setOpen] = useState(false);
+
+  const parsedQuick = !disableQuickParse ? parseQuickTodo(quickTitle, now) : null;
+  const hasQuickMeta = Boolean(parsedQuick && parsedQuick.label);
 
   // 支持从首页「+」或电脑端快捷键 N 直接聚焦极速输入栏
   useEffect(() => {
@@ -75,14 +87,24 @@ export function TodoPage() {
 
   const quickAdd = (e: FormEvent) => {
     e.preventDefault();
-    const title = quickTitle.trim();
-    if (!title || save.isPending) return;
+    const raw = quickTitle.trim();
+    if (!raw || save.isPending) return;
+    const useParsed = hasQuickMeta && parsedQuick;
+    const title = (useParsed ? parsedQuick.title : raw).slice(0, 60);
+    const dueAt = useParsed ? parsedQuick.dueAt : null;
+    const repeat = useParsed ? parsedQuick.repeat : 'none';
+    const reminders: ReminderInput[] = dueAt
+      ? [{ offsetMinutes: new Date(dueAt).getTime() - now.getTime() > 40 * 60_000 ? 30 : 0 }]
+      : [];
     save.mutate(
-      { input: { title, note: null, dueAt: null, priority: 3, reminders: [] } },
+      { input: { title, note: null, dueAt, priority: 3, repeat, reminders } },
       {
-        onSuccess: () => {
+        onSuccess: (res) => {
           setQuickTitle('');
-          toast.success('已添加待办');
+          setDisableQuickParse(false);
+          if (!res.offlineQueued) {
+            toast.success(useParsed && parsedQuick.label ? `已添加待办（${parsedQuick.label}）` : '已添加待办');
+          }
         },
         onError: (err) => toast.error(err instanceof ApiError ? err.message : '添加失败'),
       },
@@ -102,16 +124,19 @@ export function TodoPage() {
         }
       />
 
-      {/* 极速一行捕获栏：回车即可记下待办，无需每次打开弹层 */}
+      {/* 极速一行捕获栏：回车即可记下待办，自动识别「明晚8点」「每周五」等中文时间 */}
       <GlassCard className="mb-5 p-2">
         <form onSubmit={quickAdd} className="flex items-center gap-2">
           <input
             ref={quickInputRef}
             className="h-10 min-w-0 flex-1 bg-transparent px-3 text-[15px] text-fg placeholder:text-fg-muted focus:outline-none"
-            placeholder="记一件要办的事，回车立即添加…"
+            placeholder="试试「明晚8点交高数作业」或「每周五写周报」，回车即建…"
             maxLength={100}
             value={quickTitle}
-            onChange={(e) => setQuickTitle(e.target.value)}
+            onChange={(e) => {
+              setQuickTitle(e.target.value);
+              if (!e.target.value.trim()) setDisableQuickParse(false);
+            }}
           />
           {quickTitle.trim() && (
             <Button type="submit" className="h-9 shrink-0 rounded-xl! px-3.5 text-xs" loading={save.isPending}>
@@ -119,6 +144,20 @@ export function TodoPage() {
             </Button>
           )}
         </form>
+        {hasQuickMeta && parsedQuick && (
+          <div className="mt-1.5 flex flex-wrap items-center justify-between gap-2 border-t border-current/10 px-3 pt-2 pb-0.5 text-xs">
+            <span className="text-accent">
+              ✦ 已识别：{parsedQuick.label} · 标题「{parsedQuick.title}」
+            </span>
+            <button
+              type="button"
+              onClick={() => setDisableQuickParse(true)}
+              className="text-fg-muted hover:text-fg"
+            >
+              按纯文本保存
+            </button>
+          </div>
+        )}
       </GlassCard>
 
       {isPending && todos.length === 0 && <CardSkeleton rows={3} />}
@@ -164,7 +203,14 @@ export function TodoPage() {
                             toggle.mutate(
                               { id: t.id, done: !done },
                               {
-                                onSuccess: () => toast.info(!done ? `已完成「${t.title}」` : `已恢复「${t.title}」`),
+                                onSuccess: (res) => {
+                                  if (res.offlineQueued) return;
+                                  if (!done && res.nextTodo) {
+                                    toast.success(`已完成「${t.title}」，已自动生成下一次待办`);
+                                  } else {
+                                    toast.info(!done ? `已完成「${t.title}」` : `已恢复「${t.title}」`);
+                                  }
+                                },
                               },
                             )
                           }
@@ -175,6 +221,11 @@ export function TodoPage() {
                             {t.dueAt && (
                               <span className={`font-num tabular-nums ${g.key === 'overdue' ? 'text-danger' : ''}`}>
                                 截止 {formatWhen(new Date(t.dueAt), now)}
+                              </span>
+                            )}
+                            {t.repeat !== 'none' && (
+                              <span className="rounded-full bg-accent/15 px-1.5 py-0.5 text-[11px] font-medium text-accent">
+                                ↻ {TODO_REPEAT_LABELS[t.repeat]}
                               </span>
                             )}
                             {!done && nextReminder && (
@@ -199,6 +250,16 @@ export function TodoPage() {
           </section>
         ))}
       </div>
+
+      <motion.button
+        type="button"
+        aria-label="详细新建待办"
+        whileTap={{ scale: 0.92 }}
+        onClick={() => edit(null)}
+        className="fixed bottom-[calc(max(env(safe-area-inset-bottom),12px)+78px)] right-4 z-30 grid size-13 place-items-center rounded-full bg-accent text-accent-fg shadow-[0_12px_28px_-8px_var(--accent)] xl:hidden"
+      >
+        <PlusIcon size={22} />
+      </motion.button>
 
       <TodoEditor todo={editing} open={open} onClose={() => setOpen(false)} />
     </>

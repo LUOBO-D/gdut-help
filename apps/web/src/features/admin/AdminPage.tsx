@@ -17,7 +17,7 @@ import { useAuth } from '../../lib/auth-store';
 import { useAdminMerchants } from '../../lib/queries';
 import { toast } from '../../lib/toast-store';
 import { MerchantEditorSheet } from '../food/MerchantEditorSheet';
-import { useAdminMerchantAction } from '../food/mutations';
+import { useAdminMerchantAction, useSeedHemcMerchants } from '../food/mutations';
 
 export function AdminPage() {
   const user = useAuth((s) => s.user);
@@ -27,6 +27,7 @@ export function AdminPage() {
 
   const list = useAdminMerchants(status);
   const act = useAdminMerchantAction();
+  const seed = useSeedHemcMerchants();
 
   if (user && user.role !== 'admin') return <Navigate to="/" replace />;
 
@@ -40,17 +41,28 @@ export function AdminPage() {
     setEditorOpen(true);
   };
 
+  const runSeed = () => {
+    seed.mutate(undefined, {
+      onSuccess: (r) =>
+        toast.success(r.created ? `已导入 ${r.created} 家大学城默认商家（跳过 ${r.skipped} 家已有）` : '大学城默认商家均已存在'),
+      onError: () => toast.error('导入默认商家失败'),
+    });
+  };
+
   return (
     <>
       <PageHeader
         title="管理后台"
         subtitle="商家审核、状态管理与编辑"
         action={
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2">
             <Link to="/me" className="glass-thin inline-flex h-10 items-center gap-1 rounded-2xl px-3 text-sm">
               <ArrowLeftIcon size={16} />
               返回
             </Link>
+            <Button variant="ghost" className="h-10 px-3 text-sm" loading={seed.isPending} onClick={runSeed}>
+              导入大学城种子店
+            </Button>
             <Button className="h-10 gap-1 px-3 text-sm" onClick={openCreate}>
               <PlusIcon size={16} />
               新增商家

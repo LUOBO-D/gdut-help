@@ -1,6 +1,8 @@
 import { Body, Controller, Get, HttpCode, Post, Put, Query } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
 import {
+  DINING_PACE_MODES,
+  DINING_PARTY_MODES,
   MEAL_TYPES,
   mealFeedbackInputSchema,
   moodInputSchema,
@@ -19,6 +21,8 @@ import { RecommendService } from './recommend.service.js';
 
 const recommendQuerySchema = z.object({
   meal: z.enum(MEAL_TYPES).optional(),
+  party: z.enum(DINING_PARTY_MODES).optional(),
+  pace: z.enum(DINING_PACE_MODES).optional(),
   exclude: z
     .string()
     .max(2000)
@@ -73,7 +77,11 @@ export class RecommendController {
     @CurrentUser() user: AuthUser,
     @Query({ schema: recommendQuerySchema }) q: z.output<typeof recommendQuerySchema>,
   ): Promise<MealRecommendationResponse> {
-    return this.recommend.recommendMeals(user.id, { meal: q.meal, excludeIds: q.exclude });
+    return this.recommend.recommendMeals(user.id, {
+      meal: q.meal,
+      excludeIds: q.exclude,
+      context: q.party || q.pace ? { party: q.party, pace: q.pace } : undefined,
+    });
   }
 
   @Post('recommend/feedback')

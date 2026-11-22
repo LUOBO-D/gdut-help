@@ -5,6 +5,7 @@ import { ENV, type Env } from '../config/env.js';
 import { AuthController } from './auth.controller.js';
 import { AuthGuard } from './auth.guard.js';
 import { AuthService } from './auth.service.js';
+import { UserGuardCacheService } from './user-guard-cache.service.js';
 
 @Module({
   imports: [
@@ -18,6 +19,7 @@ import { AuthService } from './auth.service.js';
     }),
   ],
   controllers: [AuthController],
-  providers: [AuthService, { provide: APP_GUARD, useClass: AuthGuard }],
+  providers: [AuthService, UserGuardCacheService, { provide: APP_GUARD, useClass: AuthGuard }],
+  exports: [UserGuardCacheService],
 })
 export class AuthModule {}

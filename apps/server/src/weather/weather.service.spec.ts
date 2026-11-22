@@ -44,4 +44,52 @@ describe('WeatherService', () => {
     const internalCache = (service as unknown as { cache: Map<string, unknown> }).cache;
     expect(internalCache.size).toBeLessThanOrEqual(100);
   });
+
+  it('缓存过 10 分钟但仍在 6 小时内时启用 SWR 立即返回旧缓存并后台刷新', async () => {
+    let resolveRefresh!: (v: providers.ProviderReport) => void;
+    const spy = vi
+      .spyOn(providers, 'fetchOpenMeteo')
+      .mockResolvedValueOnce(mockReport)
+      .mockImplementationOnce(
+        () =>
+          new Promise((r) => {
+            resolveRefresh = r;
+          }),
+      );
+    const service = new WeatherService({ QWEATHER_API_HOST: '', QWEATHER_API_KEY: '' } as Env);
+
+    await service.get(23.04, 113.4, '大学城');
+    // 人为把缓存时间戳回拨 20 分钟（常规 SWR 窗口：静默返回旧值不误报 stale，同时触发后台刷新）
+    const cache = (service as unknown as { cache: Map<string, { report: providers.ProviderReport; fetchedAt: number }> }).cache;
+    const key = '23.04,113.40';
+    cache.set(key, { report: mockReport, fetchedAt: Date.now() - 20 * 60_000 });
+
+    // SWR 应立即返回（不阻塞等待 resolveRefresh）
+    const swrRes = await service.get(23.04, 113.4, '大学城');
+    expect(swrRes.stale).toBe(false);
+    expect(swrRes.now.temp).toBe(24);
+    expect(spy).toHaveBeenCalledTimes(2);
+
+    // 后台刷新完成后下次请求拿到新温度
+    resolveRefresh({ ...mockReport, now: { ...mockReport.now, temp: 28 } });
+    await new Promise((r) => setTimeout(r, 0));
+    const fresh = await service.get(23.04, 113.4, '大学城');
+    expect(fresh.stale).toBe(false);
+    expect(fresh.now.temp).toBe(28);
+  });
+
+  it('Open-Meteo 失败时自动回退到 MET Norway 备用源', async () => {
+    vi.spyOn(providers, 'fetchOpenMeteo').mockRejectedValueOnce(new Error('timeout'));
+    const fallbackSpy = vi.spyOn(providers, 'fetchMetNo').mockResolvedValueOnce({
+      ...mockReport,
+      source: 'met-no',
+      now: { ...mockReport.now, temp: 22 },
+    });
+    const service = new WeatherService({ QWEATHER_API_HOST: '', QWEATHER_API_KEY: '' } as Env);
+
+    const res = await service.get(23.04, 113.4, '大学城');
+    expect(fallbackSpy).toHaveBeenCalledTimes(1);
+    expect(res.source).toBe('met-no');
+    expect(res.now.temp).toBe(22);
+  });
 });

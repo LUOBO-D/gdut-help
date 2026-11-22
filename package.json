@@ -16,6 +16,8 @@
     "test": "pnpm -r test",
     "db:up": "docker compose -f docker/docker-compose.yml up -d",
     "db:down": "docker compose -f docker/docker-compose.yml down",
-    "db:migrate": "pnpm --filter @gduthelp/server exec prisma migrate dev"
+    "db:migrate": "pnpm --filter @gduthelp/server exec prisma migrate dev",
+    "ota:pack": "node scripts/publish-ota.mjs",
+    "ota:cloud": "node scripts/deploy-ota-cloud.mjs"
   }
 }

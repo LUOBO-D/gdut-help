@@ -123,6 +123,7 @@
   .glass-thick {
     position: relative;
     isolation: isolate;
+    contain: layout style;
     background: rgb(var(--glass-tint) / var(--glass-alpha));
     border: 1px solid var(--glass-border);
     border-radius: var(--radius-card);
@@ -133,8 +134,8 @@
     -webkit-backdrop-filter: blur(calc(var(--glass-blur) * var(--blur-scale))) saturate(160%);
     backdrop-filter: blur(calc(var(--glass-blur) * var(--blur-scale))) saturate(160%);
     transition:
-      background-color 1.2s ease,
-      border-color 1.2s ease;
+      background-color 0.6s ease,
+      border-color 0.6s ease;
   }
   .glass-thin {
     --glass-blur: 12px;
@@ -143,6 +144,26 @@
   .glass-thick {
     --glass-blur: 40px;
     background: rgb(var(--glass-tint) / calc(var(--glass-alpha) + 0.12));
+  }
+
+  /* 移动端 / 安卓 WebView 流畅度优化：收紧实时模糊半径并去掉二次 saturate 着色 pass，保留高级玻璃通透感同时稳住 60fps */
+  @media (pointer: coarse) {
+    .glass,
+    .glass-thin {
+      --glass-blur: 10px;
+      -webkit-backdrop-filter: blur(calc(var(--glass-blur) * var(--blur-scale)));
+      backdrop-filter: blur(calc(var(--glass-blur) * var(--blur-scale)));
+      background: rgb(var(--glass-tint) / calc(var(--glass-alpha) + 0.08));
+    }
+    .glass-thick {
+      --glass-blur: 18px;
+      -webkit-backdrop-filter: blur(calc(var(--glass-blur) * var(--blur-scale)));
+      backdrop-filter: blur(calc(var(--glass-blur) * var(--blur-scale)));
+      background: rgb(var(--glass-tint) / calc(var(--glass-alpha) + 0.18));
+    }
+    .glass-sheen::after {
+      display: none;
+    }
   }
   .glass-sheen::after {
     content: '';

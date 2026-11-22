@@ -1,7 +1,14 @@
-import { ErrorCode, NATIVE_CLIENT_HEADER, NATIVE_CLIENT_VALUE, type ApiResponse, type AuthSession } from '@gduthelp/shared';
+import {
+  ErrorCode,
+  NATIVE_CLIENT_HEADER,
+  NATIVE_CLIENT_VALUE,
+  type ApiResponse,
+  type AuthSession,
+  type LogoutAllResult,
+} from '@gduthelp/shared';
 import { useAuth } from './auth-store';
 import { getRefreshToken, setRefreshToken } from './native-token';
-import { API_BASE, isNative } from './platform';
+import { getApiBase, isNative } from './platform';
 
 export const NETWORK_ERROR = 'NETWORK_ERROR';
 /** access token 剩余不足这么久时，先刷新再发请求 */
@@ -54,7 +61,7 @@ async function send<T>(path: string, { method = 'GET', body, auth = true, signal
 
   let res: Response;
   try {
-    res = await fetch(API_BASE + path, {
+    res = await fetch(getApiBase() + path, {
       method,
       headers,
       body: body === undefined ? undefined : JSON.stringify(body),
@@ -64,8 +71,11 @@ async function send<T>(path: string, { method = 'GET', body, auth = true, signal
     });
   } catch (err) {
     if (err instanceof DOMException && err.name === 'AbortError') throw err;
-    // App 通过 Tailscale 连到电脑上的服务端，连不上时多半是手机上的 Tailscale 没开
-    throw new ApiError(NETWORK_ERROR, isNative ? '连不上服务器，请确认手机上的 Tailscale 已连接' : '网络连接失败，请检查网络', 0);
+    throw new ApiError(
+      NETWORK_ERROR,
+      isNative ? '连不上服务器，请检查网络或在登录页底部核对服务器地址' : '网络连接失败，请检查网络',
+      0,
+    );
   }
 
   const json = (await res.json().catch(() => null)) as ApiResponse<T> | null;
@@ -125,15 +135,33 @@ async function doRefresh(): Promise<boolean> {
   return false;
 }
 
+async function clearLocalSession(): Promise<void> {
+  await setRefreshToken(null);
+  useAuth.getState().clear();
+  if (isNative) await import('./local-reminders').then((m) => m.clearLocalReminders()).catch(() => undefined);
+  await import('./offline-queue').then((m) => m.clearOfflineQueue()).catch(() => undefined);
+  const { clearQueryCache } = await import('./query-client');
+  await clearQueryCache();
+}
+
 export async function logout(): Promise<void> {
   try {
     const body = isNative ? { refreshToken: await getRefreshToken() } : undefined;
     await send<null>('/auth/logout', { method: 'POST', auth: false, body });
   } finally {
-    await setRefreshToken(null);
-    useAuth.getState().clear();
-    if (isNative) await import('./local-reminders').then((m) => m.clearLocalReminders()).catch(() => undefined);
-    const { clearQueryCache } = await import('./query-client');
-    await clearQueryCache();
+    await clearLocalSession();
   }
+}
+
+export async function logoutAll(): Promise<LogoutAllResult> {
+  try {
+    return await api<LogoutAllResult>('/auth/logout-all', { method: 'POST' });
+  } finally {
+    await clearLocalSession();
+  }
+}
+
+export async function deleteAccount(confirmEmail: string): Promise<void> {
+  await api<null>('/me', { method: 'DELETE', body: { confirmEmail } });
+  await clearLocalSession();
 }

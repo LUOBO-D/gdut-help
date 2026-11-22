@@ -11,6 +11,7 @@ import {
   sessionsOn,
   shanghaiDate,
   today,
+  type DiningContext,
   type FeedbackSignal,
   type MealFeedback,
   type MealFeedbackInput,
@@ -156,7 +157,7 @@ export class RecommendService {
 
   async recommendMeals(
     userId: string,
-    opts: { meal?: MealType; excludeIds?: string[]; now?: Date },
+    opts: { meal?: MealType; excludeIds?: string[]; context?: DiningContext; now?: Date },
   ): Promise<MealRecommendationResponse> {
     const now = opts.now ?? new Date();
     const date = today(now);
@@ -213,6 +214,7 @@ export class RecommendService {
       mood: mood?.mood ?? null,
       preference: pref,
       feedbacks: feedbackSignals,
+      context: opts.context,
       limit: allMerchants.length || 1,
     });
 
@@ -224,6 +226,7 @@ export class RecommendService {
       mood: mood?.mood ?? null,
       preference: pref,
       feedbacks: feedbackSignals,
+      context: opts.context,
       excludeIds: opts.excludeIds,
       limit: 3,
     });

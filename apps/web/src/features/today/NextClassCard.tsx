@@ -1,7 +1,15 @@
-import { addDays, formatDuration, formatHm, sessionsOn, today, type ClassSession } from '@gduthelp/shared';
+import {
+  addDays,
+  formatDuration,
+  formatHm,
+  matchCampusBuilding,
+  sessionsOn,
+  today,
+  type ClassSession,
+} from '@gduthelp/shared';
 import { Link } from 'react-router';
 import { GlassCard } from '../../components/GlassCard';
-import { PinIcon } from '../../components/icons';
+import { NavigationIcon, PinIcon } from '../../components/icons';
 import { useAuth } from '../../lib/auth-store';
 import { useTimetable } from '../../lib/queries';
 import { useNow } from '../../lib/use-now';
@@ -29,37 +37,51 @@ export function NextClassCard() {
   const campusId = useAuth((s) => s.user?.campusId);
   const now = useNow(30_000);
 
-  let content;
-  if (isPending && !data) content = <p className="text-sm text-fg-muted">加载中…</p>;
-  else if (!data?.semester) content = <p className="text-sm text-fg-muted">管理员还没有设置当前学期</p>;
+  let next: Next | null = null;
+  let emptyText: string | null = null;
+  if (isPending && !data) emptyText = '加载中…';
+  else if (!data?.semester) emptyText = '正在初始化学期…';
   else {
     const d = today(now);
-    const next = findNext(sessionsOn(data, d, campusId), sessionsOn(data, addDays(d, 1), campusId), now);
-    content = next ? (
-      <>
-        <p className="text-xs text-accent">{next.label}</p>
-        <p className="mt-1 truncate text-lg font-semibold">{next.session.name}</p>
-        <p className="mt-1 text-xs text-fg-muted">
-          {formatHm(next.session.start)}–{formatHm(next.session.end)} · 第 {next.session.periodStart}–{next.session.periodEnd} 节
-        </p>
-        {next.session.location && (
-          <p className="mt-1 flex items-center gap-1 truncate text-xs text-fg-muted">
-            <PinIcon size={12} />
-            {next.session.location}
-          </p>
-        )}
-      </>
-    ) : (
-      <p className="text-sm text-fg-muted">{data.courses.length ? '今明两天没有课' : '还没有添加课程'}</p>
-    );
+    next = findNext(sessionsOn(data, d, campusId), sessionsOn(data, addDays(d, 1), campusId), now);
+    if (!next) emptyText = data.courses.length ? '今明两天没有课' : '还没有课表，点此一键导入 →';
   }
 
+  const mappedBuilding = next?.session.location ? matchCampusBuilding(next.session.location) : null;
+
   return (
-    <Link to="/timetable" className="block">
-      <GlassCard interactive variants={stagger.item} className="h-full min-h-32 p-4">
+    <GlassCard interactive variants={stagger.item} className="flex h-full min-h-32 flex-col justify-between p-4">
+      <Link to="/timetable" className="block flex-1">
         <h2 className="mb-2 text-[15px] font-semibold">下一节课</h2>
-        {content}
-      </GlassCard>
-    </Link>
+        {next ? (
+          <>
+            <p className="text-xs text-accent">{next.label}</p>
+            <p className="mt-1 truncate text-lg font-semibold">{next.session.name}</p>
+            <p className="mt-1 text-xs text-fg-muted">
+              {formatHm(next.session.start)}–{formatHm(next.session.end)} · 第 {next.session.periodStart}–{next.session.periodEnd} 节
+            </p>
+          </>
+        ) : (
+          <p className="text-sm text-fg-muted">{emptyText}</p>
+        )}
+      </Link>
+
+      {next?.session.location &&
+        (mappedBuilding ? (
+          <Link
+            to={`/map?q=${encodeURIComponent(next.session.location)}`}
+            className="mt-2 inline-flex max-w-full items-center gap-1 self-start rounded-full bg-accent/15 px-2.5 py-0.5 text-xs font-medium text-accent transition-opacity hover:opacity-85"
+          >
+            <PinIcon size={12} className="shrink-0" />
+            <span className="truncate">{next.session.location}</span>
+            <NavigationIcon size={11} className="shrink-0" />
+          </Link>
+        ) : (
+          <p className="mt-1.5 flex items-center gap-1 truncate text-xs text-fg-muted">
+            <PinIcon size={12} className="shrink-0" />
+            <span className="truncate">{next.session.location}</span>
+          </p>
+        ))}
+    </GlassCard>
   );
 }

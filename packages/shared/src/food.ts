@@ -116,6 +116,25 @@ export const MEAL_LABELS: Record<MealType, string> = {
 export const MEAL_FEEDBACK_ACTIONS = ['accepted', 'skipped', 'disliked'] as const;
 export type MealFeedbackAction = (typeof MEAL_FEEDBACK_ACTIONS)[number];
 
+export const DINING_PARTY_MODES = ['solo', 'group'] as const;
+export type DiningPartyMode = (typeof DINING_PARTY_MODES)[number];
+export const DINING_PARTY_LABELS: Record<DiningPartyMode, string> = {
+  solo: '一人快吃',
+  group: '结伴聚餐',
+};
+
+export const DINING_PACE_MODES = ['rush', 'relaxed'] as const;
+export type DiningPaceMode = (typeof DINING_PACE_MODES)[number];
+export const DINING_PACE_LABELS: Record<DiningPaceMode, string> = {
+  rush: '赶时间',
+  relaxed: '不急',
+};
+
+export interface DiningContext {
+  party?: DiningPartyMode;
+  pace?: DiningPaceMode;
+}
+
 function tagList(min = 0, minMsg?: string) {
   const base = z.array(z.string().trim().min(1).max(16)).max(12, '标签最多选 12 个');
   const sized = min > 0 ? base.min(min, minMsg) : base;
@@ -482,6 +501,8 @@ export interface RecommendMealsInput {
   mood: MoodType | null;
   preference: Pick<UserPreference, 'tastes' | 'dislikes' | 'budgetMin' | 'budgetMax'> | null;
   feedbacks: FeedbackSignal[];
+  /** 就餐即时场景（一人快吃/结伴聚餐、赶时间/不急） */
+  context?: DiningContext;
   /** 本次「换一批」要排除的商家 ID */
   excludeIds?: string[];
   /** 返回条数，默认 3 */
@@ -551,8 +572,13 @@ function weatherScoreOf(m: Merchant, tags: Set<string>, weather: WeatherNow | nu
   return { score: 0.6, reason: null };
 }
 
-function distanceScoreOf(m: Merchant, tags: Set<string>, schedule: MealScheduleContext): { score: number; reason: string | null } {
-  const tight = schedule.availableMinutes !== null && schedule.availableMinutes < 45;
+function distanceScoreOf(
+  m: Merchant,
+  tags: Set<string>,
+  schedule: MealScheduleContext,
+  pace?: DiningPaceMode,
+): { score: number; reason: string | null } {
+  const tight = pace === 'rush' || (pace !== 'relaxed' && schedule.availableMinutes !== null && schedule.availableMinutes < 45);
   const walk = m.walkMinutes;
 
   if (tight) {
@@ -565,14 +591,21 @@ function distanceScoreOf(m: Merchant, tags: Set<string>, schedule: MealScheduleC
     } else if (m.category === 'canteen' || m.category === 'fastfood') {
       score = 0.82;
     }
+    if (m.category === 'hotpot') score = clamp01(score - 0.3);
     if (tags.has('快手')) score = clamp01(score + 0.12);
     const reason =
       score >= 0.78
         ? walk != null
-          ? `课间紧，步行约 ${walk} 分钟不耽误下节课`
-          : '出餐快离得近，赶课来得及'
+          ? `${pace === 'rush' ? '赶时间' : '课间紧'}，步行约 ${walk} 分钟不耽误事`
+          : '出餐快离得近，赶时间来得及'
         : null;
     return { score, reason };
+  }
+
+  if (pace === 'relaxed') {
+    let score = 0.72;
+    if (m.category === 'restaurant' || m.category === 'hotpot' || m.category === 'dessert') score += 0.14;
+    return { score: clamp01(score), reason: null };
   }
 
   let score = 0.65;
@@ -582,6 +615,28 @@ function distanceScoreOf(m: Merchant, tags: Set<string>, schedule: MealScheduleC
     else score = 0.55;
   }
   return { score, reason: null };
+}
+
+function partyAdjustmentOf(
+  m: Merchant,
+  tags: Set<string>,
+  party?: DiningPartyMode,
+): { bonus: number; reason: string | null } {
+  if (!party) return { bonus: 0, reason: null };
+  if (party === 'solo') {
+    let bonus = 0;
+    if (m.category === 'canteen' || m.category === 'fastfood' || m.category === 'noodle') bonus += 0.12;
+    if (tags.has('快手') || tags.has('实惠')) bonus += 0.06;
+    if (m.category === 'hotpot' || (tags.has('聚餐') && m.priceAvg >= 35)) bonus -= 0.2;
+    const reason = bonus >= 0.14 ? '一人食省心不尴尬，出餐也快' : null;
+    return { bonus, reason };
+  }
+  let bonus = 0;
+  if (m.category === 'hotpot' || m.category === 'restaurant') bonus += 0.18;
+  if (tags.has('聚餐')) bonus += 0.12;
+  if (m.category === 'canteen' && !tags.has('聚餐')) bonus -= 0.1;
+  const reason = bonus >= 0.18 ? '适合宿舍或朋友结伴聚餐' : null;
+  return { bonus, reason };
 }
 
 function moodScoreOf(m: Merchant, tags: Set<string>, mood: MoodType | null): { score: number; reason: string | null } {
@@ -648,9 +703,11 @@ function buildReason(
     distance: { score: number; reason: string | null };
     mood: { score: number; reason: string | null };
     pref: { score: number; reason: string | null; matchedTags: string[] };
+    party?: { bonus: number; reason: string | null };
   },
 ): string {
   const ranked: { weight: number; text: string }[] = [];
+  if (parts.party?.reason) ranked.push({ weight: 0.85 + parts.party.bonus, text: parts.party.reason });
   if (parts.distance.reason) ranked.push({ weight: parts.distance.score + 0.1, text: parts.distance.reason });
   if (parts.weather.reason) ranked.push({ weight: parts.weather.score + 0.05, text: parts.weather.reason });
   if (parts.mood.reason) ranked.push({ weight: parts.mood.score, text: parts.mood.reason });
@@ -675,7 +732,7 @@ function buildReason(
  * 过滤（状态、忌口、营业餐次、预算、已排除）→ 权重打分 → 取前 10 → 按品类打散取最多 limit 个（不凑数）
  */
 export function scoreAndRecommendMeals(input: RecommendMealsInput): MealRecommendation[] {
-  const { merchants, meal, weather, schedule, mood, preference, feedbacks, excludeIds = [], limit = 3 } = input;
+  const { merchants, meal, weather, schedule, mood, preference, feedbacks, context, excludeIds = [], limit = 3 } = input;
   const excludeSet = new Set(excludeIds);
   const dislikeTags = new Set(preference?.dislikes ?? []);
 
@@ -715,9 +772,9 @@ export function scoreAndRecommendMeals(input: RecommendMealsInput): MealRecommen
       return false;
     }
 
-    // 预算允许 20% 弹性上限（想犒劳自己时再放宽 40%），避免过滤太死
+    // 预算允许 20% 弹性上限（想犒劳自己或结伴聚餐时再放宽 40%），避免过滤太死
     if (preference?.budgetMax != null) {
-      const factor = mood === 'treat' ? 1.4 : 1.2;
+      const factor = mood === 'treat' || context?.party === 'group' ? 1.4 : 1.2;
       if (m.priceAvg > Math.ceil(preference.budgetMax * factor)) return false;
     }
     if (preference?.budgetMin != null && m.priceAvg < Math.floor(preference.budgetMin * 0.7)) {
@@ -729,9 +786,10 @@ export function scoreAndRecommendMeals(input: RecommendMealsInput): MealRecommen
   const scored: MealRecommendation[] = eligible.map((m) => {
     const tags = merchantTagsSet(m);
     const w = weatherScoreOf(m, tags, weather);
-    const d = distanceScoreOf(m, tags, schedule);
+    const d = distanceScoreOf(m, tags, schedule, context?.pace);
     const mo = moodScoreOf(m, tags, mood);
     const p = preferenceScoreOf(m, tags, preference, acceptedCounts.get(m.id) ?? 0);
+    const party = partyAdjustmentOf(m, tags, context?.party);
     const community = m.ratingCount > 0 ? clamp01(m.bayesScore / 5) : 0.6;
 
     const lastEaten = recentAcceptedDays.get(m.id);
@@ -741,7 +799,8 @@ export function scoreAndRecommendMeals(input: RecommendMealsInput): MealRecommen
     const total = Math.max(
       0,
       Math.round(
-        (0.25 * w.score + 0.2 * d.score + 0.2 * mo.score + 0.2 * p.score + 0.15 * community - repeatPenalty) * 1000,
+        (0.25 * w.score + 0.2 * d.score + 0.2 * mo.score + 0.2 * p.score + 0.15 * community + party.bonus - repeatPenalty) *
+          1000,
       ) / 1000,
     );
 
@@ -757,7 +816,7 @@ export function scoreAndRecommendMeals(input: RecommendMealsInput): MealRecommen
         repeatPenalty,
         total,
       },
-      reason: buildReason(m, { weather: w, distance: d, mood: mo, pref: p }),
+      reason: buildReason(m, { weather: w, distance: d, mood: mo, pref: p, party }),
       matchedTags: p.matchedTags,
     };
   });

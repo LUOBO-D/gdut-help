@@ -17,15 +17,15 @@ export const pressable = {
   transition: spring.bouncy,
 } as const;
 
-/** 列表依次进入：父级用 container，子项用 item */
+/** 列表依次进入：轻量快速，不阻塞页面切换 */
 export const stagger = {
   container: {
     hidden: {},
-    show: { transition: { staggerChildren: 0.04 } },
+    show: { transition: { staggerChildren: 0.02 } },
   } satisfies Variants,
   item: {
-    hidden: { opacity: 0, y: 12 },
-    show: { opacity: 1, y: 0, transition: spring.snappy },
+    hidden: { opacity: 0, y: 6 },
+    show: { opacity: 1, y: 0, transition: { duration: 0.16, ease: 'easeOut' } },
   } satisfies Variants,
 };
 

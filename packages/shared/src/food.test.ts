@@ -40,7 +40,7 @@ describe('商家查重逻辑', () => {
   it('包含关系与相近名称能被同校区查重命中，跨校区和已拒绝会被排除', () => {
     const candidates = [
       makeMerchant({ id: '1', name: '二饭三楼老广煲仔饭', locationText: '二饭三楼' }),
-      makeMerchant({ id: '2', name: '贝岗隆江猪脚饭', locationText: '贝岗村' }),
+      makeMerchant({ id: '2', name: '南亭隆江猪脚饭', locationText: '南亭村' }),
       makeMerchant({ id: '3', name: '煲仔饭', campusId: 'other', locationText: '其他校区' }),
       makeMerchant({ id: '4', name: '老广煲仔饭', status: 'rejected' }),
     ];
@@ -167,7 +167,7 @@ describe('吃什么规则推荐打分', () => {
 
   it('课间不足 45 分钟时，步行近的商家显著高于远的商家', () => {
     const near = makeMerchant({ id: 'near', name: '一饭快餐', walkMinutes: 3, tags: ['饭', '快手'] });
-    const far = makeMerchant({ id: 'far', name: '贝岗远店', walkMinutes: 20, tags: ['饭', '热食'] });
+    const far = makeMerchant({ id: 'far', name: 'GOGO远店', walkMinutes: 20, tags: ['饭', '热食'] });
 
     const res = scoreAndRecommendMeals({
       merchants: [far, near],
@@ -180,5 +180,48 @@ describe('吃什么规则推荐打分', () => {
     });
     expect(res[0]!.merchant.id).toBe('near');
     expect(res[0]!.reason).toContain('步行约 3 分钟');
+  });
+
+  it('场景快选「结伴聚餐」优先火锅/餐厅，「一人快吃 + 赶时间」优先近且快的食堂档口', () => {
+    const canteen = makeMerchant({
+      id: 'canteen',
+      name: '一饭烧腊',
+      category: 'canteen',
+      walkMinutes: 4,
+      priceAvg: 15,
+      tags: ['饭', '快手', '实惠'],
+    });
+    const hotpot = makeMerchant({
+      id: 'hotpot',
+      name: '南亭炭火烧烤',
+      category: 'hotpot',
+      walkMinutes: 14,
+      priceAvg: 55,
+      tags: ['汤', '热食', '聚餐'],
+    });
+
+    const groupRes = scoreAndRecommendMeals({
+      merchants: [canteen, hotpot],
+      meal: 'dinner',
+      weather: null,
+      schedule: baseSchedule,
+      mood: null,
+      preference: null,
+      feedbacks: [],
+      context: { party: 'group', pace: 'relaxed' },
+    });
+    expect(groupRes[0]!.merchant.id).toBe('hotpot');
+
+    const soloRushRes = scoreAndRecommendMeals({
+      merchants: [hotpot, canteen],
+      meal: 'lunch',
+      weather: null,
+      schedule: baseSchedule,
+      mood: null,
+      preference: null,
+      feedbacks: [],
+      context: { party: 'solo', pace: 'rush' },
+    });
+    expect(soloRushRes[0]!.merchant.id).toBe('canteen');
   });
 });

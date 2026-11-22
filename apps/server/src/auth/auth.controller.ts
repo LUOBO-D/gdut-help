@@ -1,22 +1,33 @@
-import { Body, Controller, Cookies, Headers, HttpCode, Inject, Post, Req, Res } from '@nestjs/common';
+import { Body, Controller, Cookies, Get, Headers, HttpCode, Inject, Post, Req, Res } from '@nestjs/common';
 import { HttpAdapterHost } from '@nestjs/core';
 import { Throttle } from '@nestjs/throttler';
 import {
+  changePasswordSchema,
   emailCodeRequestSchema,
   loginRequestSchema,
   NATIVE_CLIENT_HEADER,
   NATIVE_CLIENT_VALUE,
   nativeRefreshSchema,
+  passwordLoginRequestSchema,
+  registerWithPasswordSchema,
+  resetPasswordSchema,
+  type AuthConfig,
   type AuthSession,
+  type ChangePasswordRequest,
   type EmailCodeRequest,
   type EmailCodeSent,
   type LoginRequest,
+  type LogoutAllResult,
   type NativeRefreshRequest,
+  type PasswordLoginRequest,
+  type RegisterWithPasswordRequest,
+  type ResetPasswordRequest,
+  type UserProfile,
 } from '@gduthelp/shared';
 import type { Request } from 'express';
 import { clientIp } from '../common/client-ip.js';
 import { ENV, type Env } from '../config/env.js';
-import { Public } from './auth.decorators.js';
+import { CurrentUser, Protected, Public, type AuthUser } from './auth.decorators.js';
 import { AuthService, RefreshRaceException, type IssuedSession } from './auth.service.js';
 export const REFRESH_COOKIE = 'gdut_rt';
 const REFRESH_COOKIE_PATH = '/api/v1/auth';
@@ -34,12 +45,20 @@ export class AuthController {
     private readonly adapterHost: HttpAdapterHost,
     @Inject(ENV) private readonly env: Env,
   ) {}
+
+  /** 返回前端登录页需要的公开策略（是否限制校园邮箱域名、是否需要邀请码） */
+  @Get('config')
+  config(): AuthConfig {
+    return this.auth.getAuthConfig();
+  }
+
   @Post('email-code')
   @HttpCode(200)
   @Throttle({ default: { limit: 5, ttl: 60_000 } })
   sendEmailCode(@Body({ schema: emailCodeRequestSchema }) body: EmailCodeRequest, @Req() req: Request): Promise<EmailCodeSent> {
-    return this.auth.sendEmailCode(body.email, clientIp(req));
+    return this.auth.sendEmailCode(body.email, clientIp(req), body.inviteCode);
   }
+
   @Post('login')
   @HttpCode(200)
   @Throttle({ default: { limit: 10, ttl: 60_000 } })
@@ -49,7 +68,58 @@ export class AuthController {
     @Headers(NATIVE_CLIENT_HEADER) client: string | undefined,
     @Res({ passthrough: true }) res: unknown,
   ): Promise<AuthSession> {
-    return this.respond(res, client, await this.auth.loginWithEmailCode(body.email, body.code, userAgent));
+    return this.respond(
+      res,
+      client,
+      await this.auth.loginWithEmailCode(body.email, body.code, userAgent, body.inviteCode),
+    );
+  }
+
+  /** 邮箱 + 密码登录 */
+  @Post('login/password')
+  @HttpCode(200)
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
+  async loginWithPassword(
+    @Body({ schema: passwordLoginRequestSchema }) body: PasswordLoginRequest,
+    @Headers('user-agent') userAgent: string | undefined,
+    @Headers(NATIVE_CLIENT_HEADER) client: string | undefined,
+    @Res({ passthrough: true }) res: unknown,
+  ): Promise<AuthSession> {
+    return this.respond(res, client, await this.auth.loginWithPassword(body.email, body.password, userAgent));
+  }
+
+  /** 邮箱验证码注册并设置密码（已用验证码登过的老账号也可借此设置密码） */
+  @Post('register')
+  @HttpCode(200)
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
+  async register(
+    @Body({ schema: registerWithPasswordSchema }) body: RegisterWithPasswordRequest,
+    @Headers('user-agent') userAgent: string | undefined,
+    @Headers(NATIVE_CLIENT_HEADER) client: string | undefined,
+    @Res({ passthrough: true }) res: unknown,
+  ): Promise<AuthSession> {
+    return this.respond(res, client, await this.auth.registerWithPassword(body, userAgent));
+  }
+
+  /** 忘记密码：通过邮箱验证码重置密码并吊销所有旧会话 */
+  @Post('password/reset')
+  @HttpCode(200)
+  @Throttle({ default: { limit: 5, ttl: 60_000 } })
+  async resetPassword(@Body({ schema: resetPasswordSchema }) body: ResetPasswordRequest): Promise<null> {
+    await this.auth.resetPassword(body);
+    return null;
+  }
+
+  /** 登录状态下设置或修改登录密码 */
+  @Protected()
+  @Post('password/change')
+  @HttpCode(200)
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
+  changePassword(
+    @CurrentUser() user: AuthUser,
+    @Body({ schema: changePasswordSchema }) body: ChangePasswordRequest,
+  ): Promise<UserProfile> {
+    return this.auth.changePassword(user.id, body);
   }
   @Post('refresh')
   @HttpCode(200)
@@ -86,6 +156,23 @@ export class AuthController {
     await this.auth.logout(cookie);
     this.adapterHost.httpAdapter.clearCookie(res, REFRESH_COOKIE, { path: REFRESH_COOKIE_PATH });
     return null;
+  }
+
+  /** 退出当前账号下全部设备：吊销全部刷新令牌并即时令已有 access token 失效 */
+  @Protected()
+  @Post('logout-all')
+  @HttpCode(200)
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
+  async logoutAll(
+    @CurrentUser() user: AuthUser,
+    @Headers(NATIVE_CLIENT_HEADER) client: string | undefined,
+    @Res({ passthrough: true }) res: unknown,
+  ): Promise<LogoutAllResult> {
+    const result = await this.auth.logoutAll(user.id);
+    if (!isNative(client)) {
+      this.adapterHost.httpAdapter.clearCookie(res, REFRESH_COOKIE, { path: REFRESH_COOKIE_PATH });
+    }
+    return result;
   }
   private respond(res: unknown, client: string | undefined, issued: IssuedSession): AuthSession {
     if (isNative(client)) return { ...issued.session, refreshToken: issued.refreshToken };

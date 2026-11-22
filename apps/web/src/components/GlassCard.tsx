@@ -16,8 +16,9 @@ const VARIANT_CLASS: Record<Variant, string> = {
   thick: 'glass-thick',
 };
 
-/** 指针位置写入 CSS 变量，由 .glass-sheen::after 渲染高光，不触发 React 重渲染。 */
+/** 指针位置写入 CSS 变量，由 .glass-sheen::after 渲染高光（仅鼠标悬停触发，避免触屏滑动强触发布局重算）。 */
 function trackSheen(e: PointerEvent<HTMLDivElement>) {
+  if (e.pointerType !== 'mouse') return;
   const el = e.currentTarget;
   const rect = el.getBoundingClientRect();
   el.style.setProperty('--mx', `${e.clientX - rect.left}px`);

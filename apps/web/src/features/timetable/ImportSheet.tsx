@@ -1,6 +1,7 @@
 import {
   diffImport,
   parseTimetableImport,
+  timetableShareCodeSchema,
   type Course,
   type ImportDiff,
   type ImportedCourse,
@@ -8,6 +9,7 @@ import {
   type ImportParseResult,
   type Semester,
   type TimetableImportResult,
+  type TimetableSharePayload,
 } from '@gduthelp/shared';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useMemo, useState, type ChangeEvent } from 'react';
@@ -51,7 +53,7 @@ const slotText = (s: ImportedSlot, courseLocation: string | null) =>
 
 export function ImportSheet({ open, onClose, semester, courses }: { open: boolean; onClose: () => void; semester: Semester; courses: Course[] }) {
   return (
-    <Sheet open={open} onClose={onClose} title="从教务系统导入">
+    <Sheet open={open} onClose={onClose} title="导入课表">
       {open && <ImportForm semester={semester} courses={courses} onDone={onClose} />}
     </Sheet>
   );
@@ -60,11 +62,32 @@ export function ImportSheet({ open, onClose, semester, courses }: { open: boolea
 function ImportForm({ semester, courses, onDone }: { semester: Semester; courses: Course[]; onDone: () => void }) {
   const qc = useQueryClient();
   const [text, setText] = useState('');
+  const [shareCode, setShareCode] = useState('');
+  const [shareSource, setShareSource] = useState<string | null>(null);
   const [parsed, setParsed] = useState<ImportParseResult | null>(null);
   const [removeMissing, setRemoveMissing] = useState(true);
   const [meta, setMeta] = useState<JwMeta | null>(null);
   const isAdmin = useAuth((s) => s.user?.role === 'admin');
   const campusId = useAuth((s) => s.user?.campusId);
+
+  const fetchShare = useMutation({
+    mutationFn: (code: string) => api<TimetableSharePayload>(`/timetable/share/${encodeURIComponent(code)}`),
+    onSuccess: (payload) => {
+      setShareSource(`${payload.semesterName} · 分享码 ${payload.code}`);
+      setParsed({
+        courses: payload.courses,
+        warnings: [],
+        records: payload.courses.reduce((n, c) => n + c.slots.length, 0),
+      });
+      submit.reset();
+    },
+  });
+
+  const loadShareCode = () => {
+    const res = timetableShareCodeSchema.safeParse(shareCode);
+    if (!res.success) return;
+    fetchShare.mutate(res.data);
+  };
 
   const diff: ImportDiff | null = useMemo(() => (parsed?.courses.length ? diffImport(courses, parsed.courses) : null), [parsed, courses]);
   const maxWeek = useMemo(() => Math.max(0, ...(parsed?.courses.flatMap((c) => c.slots.flatMap((s) => s.weeks)) ?? [])), [parsed]);
@@ -77,13 +100,19 @@ function ImportForm({ semester, courses, onDone }: { semester: Semester; courses
     mutationFn: () =>
       api<TimetableImportResult>('/timetable/import', {
         method: 'POST',
-        body: { courses: parsed!.courses, removeMissing },
+        body: {
+          courses: parsed!.courses,
+          removeMissing,
+          ...(meta?.weekOneMonday ? { weekOneMonday: meta.weekOneMonday } : {}),
+          ...(meta?.semesterName ? { semesterName: meta.semesterName } : {}),
+        },
       }),
     onSuccess: () => void qc.invalidateQueries({ queryKey: keys.timetable }),
   });
 
   const parse = (value: string) => {
     setText(value);
+    setShareSource(null);
     setParsed(
       value.trim()
         ? parseTimetableImport(value, {
@@ -120,6 +149,33 @@ function ImportForm({ semester, courses, onDone }: { semester: Semester; courses
 
   return (
     <div className="space-y-4">
+      <div className="surface-subtle space-y-2 rounded-2xl p-3">
+        <p className="text-sm font-medium">用同班同学的 6 位分享码一键复制</p>
+        <div className="flex gap-2">
+          <input
+            className="field h-10 flex-1 py-0 font-num uppercase tracking-widest"
+            placeholder="输入 6 位码，如 A3K7MP"
+            maxLength={6}
+            value={shareCode}
+            onChange={(e) => setShareCode(e.target.value.toUpperCase().replace(/[^A-Z2-9]/g, ''))}
+            aria-label="课表分享码"
+          />
+          <Button
+            variant="ghost"
+            className="h-10 shrink-0 px-4 text-sm"
+            disabled={shareCode.length !== 6}
+            loading={fetchShare.isPending}
+            onClick={loadShareCode}
+          >
+            读取
+          </Button>
+        </div>
+        {shareSource && <p className="text-xs text-accent">已加载：{shareSource}</p>}
+        {fetchShare.error && (
+          <p className="text-xs text-danger">{fetchShare.error instanceof ApiError ? fetchShare.error.message : '读取分享码失败'}</p>
+        )}
+      </div>
+
       {isNative && (
         <JwFetch
           onData={(json, m) => {

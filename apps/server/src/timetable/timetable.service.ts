@@ -1,21 +1,39 @@
-import { Injectable } from '@nestjs/common';
+import { randomBytes } from 'node:crypto';
+import { HttpStatus, Injectable } from '@nestjs/common';
 import {
   COURSE_COLORS,
   courseInputSchema,
+  defaultGdutSemester,
   diffImport,
   ErrorCode,
   formatDate,
+  importKeyOf,
   timetableImportSchema,
-  type TimetableImportResult,
   type Course,
+  type ImportedCourse,
   type Semester,
   type SemesterInput,
   type TimetableData,
+  type TimetableImportResult,
+  type TimetableShareCreated,
+  type TimetableSharePayload,
 } from '@gduthelp/shared';
 import type { z } from 'zod';
 import { AppException } from '../common/app.exception.js';
-import type { Course as CourseRow, CourseSlot, Semester as SemesterRow } from '../generated/prisma/client.js';
+import type { Course as CourseRow, CourseSlot, Prisma, Semester as SemesterRow } from '../generated/prisma/client.js';
 import { PrismaService } from '../prisma/prisma.service.js';
+
+const SHARE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+const SHARE_TTL_MS = 7 * 24 * 3600_000;
+
+function randomShareCode(): string {
+  const bytes = randomBytes(6);
+  let out = '';
+  for (let i = 0; i < 6; i++) {
+    out += SHARE_ALPHABET[bytes[i]! % SHARE_ALPHABET.length]!;
+  }
+  return out;
+}
 
 type CourseData = z.output<typeof courseInputSchema>;
 type ImportData = z.output<typeof timetableImportSchema>;
@@ -53,6 +71,17 @@ export class TimetableService {
     return s ? toSemester(s) : null;
   }
 
+  /**
+   * 获取当前学期；如果数据库里尚无学期，自动按当前北京时间创建广工默认学期（20 周），
+   * 让任何同学首次打开课表就能立刻自助导入/添加课程，不再卡在「等管理员设置学期」。
+   */
+  async ensureCurrentSemester(): Promise<Semester> {
+    const existing = await this.currentSemester();
+    if (existing) return existing;
+    const def = defaultGdutSemester();
+    return this.setCurrentSemester(def);
+  }
+
   /** 设置当前学期：同名学期存在则更新，否则新建；其他学期取消 current */
   async setCurrentSemester(input: SemesterInput): Promise<Semester> {
     const startDate = new Date(`${input.startDate}T00:00:00Z`);
@@ -67,8 +96,7 @@ export class TimetableService {
   }
 
   async data(userId: string): Promise<TimetableData> {
-    const semester = await this.currentSemester();
-    if (!semester) return { semester: null, courses: [] };
+    const semester = await this.ensureCurrentSemester();
     const courses = await this.prisma.course.findMany({
       where: { userId, semesterId: semester.id },
       include: { slots: true },
@@ -78,8 +106,7 @@ export class TimetableService {
   }
 
   async create(userId: string, data: CourseData): Promise<Course> {
-    const semester = await this.currentSemester();
-    if (!semester) throw new AppException(ErrorCode.VALIDATION_FAILED, '管理员还没有设置当前学期');
+    const semester = await this.ensureCurrentSemester();
     const row = await this.prisma.course.create({
       data: {
         userId,
@@ -120,8 +147,19 @@ export class TimetableService {
    * 手动添加的课不会被改动。颜色只在新建时分配，之后保留用户改过的颜色。
    */
   async importCourses(userId: string, data: ImportData): Promise<TimetableImportResult> {
-    const semester = await this.currentSemester();
-    if (!semester) throw new AppException(ErrorCode.VALIDATION_FAILED, '管理员还没有设置当前学期');
+    let semester = await this.ensureCurrentSemester();
+    // 首次从教务系统导入时，若本学期尚未有任何课程且教务返回了真实开学周一日期，自动校准全校当前学期，无需等管理员手工设置
+    if (data.weekOneMonday && data.weekOneMonday !== semester.startDate) {
+      const totalCoursesInSemester = await this.prisma.course.count({ where: { semesterId: semester.id } });
+      if (totalCoursesInSemester === 0) {
+        const maxWeek = Math.max(semester.totalWeeks, ...data.courses.flatMap((c) => c.slots.flatMap((s) => s.weeks)));
+        semester = await this.setCurrentSemester({
+          name: data.semesterName || semester.name,
+          startDate: data.weekOneMonday,
+          totalWeeks: Math.min(30, maxWeek),
+        });
+      }
+    }
     const keys = new Set<string>();
     for (const c of data.courses) {
       if (keys.has(c.importKey)) throw new AppException(ErrorCode.VALIDATION_FAILED, `课程重复：${c.name}`);
@@ -175,6 +213,74 @@ export class TimetableService {
   async remove(userId: string, id: string): Promise<void> {
     await this.owned(userId, id);
     await this.prisma.course.delete({ where: { id } });
+  }
+
+  /** 生成 6 位分享码（7 天有效），把当前学期课表快照脱敏后供同班同学一键复制 */
+  async createShare(userId: string): Promise<TimetableShareCreated> {
+    const tt = await this.data(userId);
+    if (!tt.semester) throw new AppException(ErrorCode.VALIDATION_FAILED, '管理员还没有设置当前学期');
+    if (!tt.courses.length) throw new AppException(ErrorCode.VALIDATION_FAILED, '当前学期还没有课程可分享');
+
+    const snapshot: ImportedCourse[] = tt.courses.map((c) => ({
+      importKey: c.importKey || importKeyOf(c.name, c.teacher),
+      name: c.name,
+      teacher: c.teacher,
+      location: c.location,
+      slots: c.slots.map((s) => ({
+        weekday: s.weekday,
+        periodStart: s.periodStart,
+        periodEnd: s.periodEnd,
+        weeks: s.weeks,
+        location: s.location ?? null,
+      })),
+    }));
+
+    const now = new Date();
+    const expiresAt = new Date(now.getTime() + SHARE_TTL_MS);
+
+    // 顺手清理过期分享码，保持表精简
+    await this.prisma.timetableShare.deleteMany({ where: { expiresAt: { lt: now } } }).catch(() => {});
+
+    for (let attempt = 0; attempt < 5; attempt++) {
+      const code = randomShareCode();
+      try {
+        await this.prisma.timetableShare.create({
+          data: {
+            code,
+            createdBy: userId,
+            semesterId: tt.semester.id,
+            courses: snapshot as unknown as Prisma.InputJsonValue,
+            expiresAt,
+          },
+        });
+        return {
+          code,
+          courseCount: snapshot.length,
+          semesterName: tt.semester.name,
+          expiresAt: expiresAt.toISOString(),
+        };
+      } catch {
+        // 极低概率撞码，重试
+      }
+    }
+    throw new AppException(ErrorCode.INTERNAL_ERROR, '生成分享码失败，请重试', HttpStatus.INTERNAL_SERVER_ERROR);
+  }
+
+  async getShare(code: string): Promise<TimetableSharePayload> {
+    const row = await this.prisma.timetableShare.findUnique({
+      where: { code: code.toUpperCase() },
+      include: { semester: { select: { name: true } } },
+    });
+    if (!row || row.expiresAt.getTime() < Date.now()) {
+      throw new AppException(ErrorCode.NOT_FOUND, '分享码不存在或已过期', HttpStatus.NOT_FOUND);
+    }
+    const courses = Array.isArray(row.courses) ? (row.courses as unknown as TimetableSharePayload['courses']) : [];
+    return {
+      code: row.code,
+      semesterName: row.semester.name,
+      courses,
+      expiresAt: row.expiresAt.toISOString(),
+    };
   }
 
   private async owned(userId: string, id: string) {

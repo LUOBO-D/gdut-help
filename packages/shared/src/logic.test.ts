@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
+import { compareSemver } from './app-update.js';
 import { addDays, daysBetween, parseDate, shanghaiDate, shanghaiTime, today } from './time.js';
 import { semesterInputSchema } from './timetable-schema.js';
-import { dateOf, sessionsOn, weekOf, type TimetableData } from './timetable.js';
+import { dateOf, defaultGdutSemester, sessionsOn, weekOf, type TimetableData } from './timetable.js';
 import { reminderFireAt, todoInputSchema } from './todo.js';
 
 describe('北京时间', () => {
@@ -87,5 +88,25 @@ describe('待办提醒', () => {
   it('没有截止时间时不能用「截止前提醒」', () => {
     expect(todoInputSchema.safeParse({ title: 'x', reminders: [{ offsetMinutes: 10 }] }).success).toBe(false);
     expect(todoInputSchema.safeParse({ title: 'x', reminders: [{ at: '2026-09-07T10:00:00+08:00' }] }).success).toBe(true);
+  });
+});
+
+describe('默认学期与热更新版本比较', () => {
+  it('defaultGdutSemester 生成合法的周一开学默认学期', () => {
+    const autumn = defaultGdutSemester(new Date('2026-11-21T08:00:00+08:00'));
+    expect(autumn.name).toBe('2026秋季学期');
+    expect(parseDate(autumn.startDate).weekday).toBe(1);
+    expect(autumn.totalWeeks).toBe(20);
+
+    const spring = defaultGdutSemester(new Date('2027-03-10T08:00:00+08:00'));
+    expect(spring.name).toBe('2027春季学期');
+    expect(parseDate(spring.startDate).weekday).toBe(1);
+  });
+
+  it('compareSemver 正确比较主次修订号', () => {
+    expect(compareSemver('0.2.1', '0.2.0')).toBeGreaterThan(0);
+    expect(compareSemver('v1.0.0', '0.9.9')).toBeGreaterThan(0);
+    expect(compareSemver('0.2.0', '0.2.0')).toBe(0);
+    expect(compareSemver('0.1.9', '0.2.0')).toBeLessThan(0);
   });
 });

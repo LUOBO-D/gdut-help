@@ -24,6 +24,18 @@ const envSchema = z
           .map((e) => e.trim().toLowerCase())
           .filter(Boolean),
       ),
+    /** 可选：允许注册/登录的邮箱域名白名单，逗号分隔（如 mail2.gdut.edu.cn,gdut.edu.cn）；留空表示不限制 */
+    ALLOWED_EMAIL_DOMAINS: z
+      .string()
+      .default('')
+      .transform((v) =>
+        v
+          .split(',')
+          .map((d) => d.trim().toLowerCase().replace(/^@/, ''))
+          .filter(Boolean),
+      ),
+    /** 可选：新同学注册邀请码；留空表示自由注册 */
+    INVITE_CODE: z.string().trim().default(''),
     MAIL_DRIVER: z.enum(['console', 'smtp']).default('console'),
     SMTP_HOST: z.string().default(''),
     SMTP_PORT: z.coerce.number().int().positive().default(465),
@@ -59,6 +71,10 @@ const envSchema = z
     LLM_API_BASE: z.string().default('https://api.deepseek.com/v1'),
     LLM_API_KEY: z.string().default(''),
     LLM_MODEL: z.string().default('deepseek-chat'),
+    /** 可选：单容器部署时由后端托管前端构建产物（apps/web/dist）的目录路径 */
+    STATIC_DIR: z.string().default(''),
+    /** 可选：自托管安卓 App OTA 热更新包目录（包含 manifest.json 与 bundle-*.zip），默认 apps/server/ota-bundles */
+    OTA_DIR: z.string().default(''),
   })
   .superRefine((env, ctx) => {
     if (env.NODE_ENV === 'production' && env.MAIL_DRIVER === 'console') {

@@ -7,6 +7,9 @@ export const REQUIRE_ADMIN = 'auth:requireAdmin';
 /** 标记无需登录即可访问的接口。其余接口默认都要求有效的 access token。 */
 export const Public = () => SetMetadata(IS_PUBLIC, true);
 
+/** 在类级别标了 @Public() 的控制器中，显式要求该接口必须携带有效登录态 */
+export const Protected = () => SetMetadata(IS_PUBLIC, false);
+
 /** 仅管理员可访问（role 来自 access token，最长 15 分钟后随刷新更新） */
 export const AdminOnly = () => SetMetadata(REQUIRE_ADMIN, true);
 

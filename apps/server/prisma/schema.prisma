@@ -19,10 +19,13 @@ enum UserStatus {
 
 model User {
   id         String     @id @default(uuid()) @db.Uuid
-  email      String     @unique
+  email             String     @unique
   /// 公开发布后用于实名，自用阶段为空
-  phone      String?    @unique
-  nickname   String
+  phone             String?    @unique
+  /// 可选登录密码（scrypt 哈希）；未设置时仅用邮箱验证码登录
+  passwordHash      String?    @map("password_hash")
+  passwordUpdatedAt DateTime?  @map("password_updated_at") @db.Timestamptz
+  nickname          String
   avatarUrl  String?    @map("avatar_url")
   role       UserRole   @default(user)
   /// 0 新用户 / 1 普通 / 2 可信（见 docs/03-backend.md 4.5）
@@ -33,7 +36,9 @@ model User {
   /// 提醒是否同时发邮件（安卓上浏览器推送不可靠，邮件是保底渠道）
   remindByEmail Boolean    @default(true) @map("remind_by_email")
   /// 是否开启每天饭点（11:30 / 17:20）自动推送餐食推荐
-  remindMeal    Boolean    @default(false) @map("remind_meal")
+  remindMeal         Boolean    @default(false) @map("remind_meal")
+  /// 课前提醒提前分钟数（0 关闭 / 10 / 15 / 20）
+  classRemindMinutes Int        @default(0) @map("class_remind_minutes") @db.SmallInt
   createdAt  DateTime   @default(now()) @map("created_at") @db.Timestamptz
   updatedAt  DateTime   @updatedAt @map("updated_at") @db.Timestamptz
 
@@ -53,6 +58,8 @@ model User {
   reviews               Review[]
   reviewLikes           ReviewLike[]
   mealNotifyLogs        MealNotifyLog[]
+  classNotifyLogs       ClassNotifyLog[]
+  timetableShares       TimetableShare[]
 
   @@map("users")
 }
@@ -101,6 +108,7 @@ model Semester {
   updatedAt  DateTime @updatedAt @map("updated_at") @db.Timestamptz
 
   courses Course[]
+  shares  TimetableShare[]
 
   @@map("semesters")
 }
@@ -150,17 +158,25 @@ model CourseSlot {
   @@map("course_slots")
 }
 
+enum TodoRepeat {
+  none
+  daily
+  weekly
+}
+
 model Todo {
-  id          String    @id @default(uuid()) @db.Uuid
-  userId      String    @map("user_id") @db.Uuid
+  id          String     @id @default(uuid()) @db.Uuid
+  userId      String     @map("user_id") @db.Uuid
   title       String
   note        String?
-  dueAt       DateTime? @map("due_at") @db.Timestamptz
+  dueAt       DateTime?  @map("due_at") @db.Timestamptz
   /// 1 最高 … 4 最低
-  priority    Int       @default(3) @db.SmallInt
-  completedAt DateTime? @map("completed_at") @db.Timestamptz
-  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz
-  updatedAt   DateTime  @updatedAt @map("updated_at") @db.Timestamptz
+  priority    Int        @default(3) @db.SmallInt
+  /// 重复周期：none 不重复 / daily 每天 / weekly 每周
+  repeat      TodoRepeat @default(none)
+  completedAt DateTime?  @map("completed_at") @db.Timestamptz
+  createdAt   DateTime   @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt   DateTime   @updatedAt @map("updated_at") @db.Timestamptz
 
   user      User       @relation(fields: [userId], references: [id], onDelete: Cascade)
   reminders Reminder[]
@@ -477,4 +493,36 @@ model MealNotifyLog {
 
   @@unique([userId, date, meal])
   @@map("meal_notify_logs")
+}
+
+/// 课前提醒幂等记录：保证每节具体上课只发一次服务端提醒
+model ClassNotifyLog {
+  id          String   @id @default(uuid()) @db.Uuid
+  userId      String   @map("user_id") @db.Uuid
+  /// 北京日期 'YYYY-MM-DD'
+  date        String
+  courseId    String   @map("course_id") @db.Uuid
+  periodStart Int      @map("period_start") @db.SmallInt
+  sentAt      DateTime @default(now()) @map("sent_at") @db.Timestamptz
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, date, courseId, periodStart])
+  @@map("class_notify_logs")
+}
+
+/// 课表 6 位短码分享快照（7 天有效，不含分享者个人敏感信息）
+model TimetableShare {
+  code       String   @id
+  createdBy  String   @map("created_by") @db.Uuid
+  semesterId String   @map("semester_id") @db.Uuid
+  courses    Json
+  expiresAt  DateTime @map("expires_at") @db.Timestamptz
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  creator  User     @relation(fields: [createdBy], references: [id], onDelete: Cascade)
+  semester Semester @relation(fields: [semesterId], references: [id], onDelete: Cascade)
+
+  @@index([expiresAt])
+  @@map("timetable_shares")
 }

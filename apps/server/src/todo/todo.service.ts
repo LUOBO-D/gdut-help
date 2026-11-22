@@ -1,5 +1,13 @@
 import { Injectable } from '@nestjs/common';
-import { ErrorCode, reminderFireAt, todoInputSchema, type Todo } from '@gduthelp/shared';
+import {
+  ErrorCode,
+  nextRepeatDueAt,
+  reminderFireAt,
+  todoInputSchema,
+  type ReminderInput,
+  type Todo,
+  type TodoCompleteResult,
+} from '@gduthelp/shared';
 import type { z } from 'zod';
 import { AppException } from '../common/app.exception.js';
 import type { Prisma, Reminder, Todo as TodoRow } from '../generated/prisma/client.js';
@@ -19,6 +27,7 @@ const toTodo = (t: TodoRow & { reminders: Reminder[] }): Todo => ({
   note: t.note,
   dueAt: t.dueAt?.toISOString() ?? null,
   priority: t.priority,
+  repeat: t.repeat,
   completedAt: t.completedAt?.toISOString() ?? null,
   createdAt: t.createdAt.toISOString(),
   reminders: t.reminders
@@ -61,22 +70,53 @@ export class TodoService {
     return toTodo(row);
   }
 
-  async setCompleted(userId: string, id: string, completed: boolean): Promise<Todo> {
+  async setCompleted(userId: string, id: string, completed: boolean): Promise<TodoCompleteResult> {
     await this.owned(userId, id);
-    const row = await this.prisma.$transaction(async (tx) => {
-      await tx.todo.update({ where: { id }, data: { completedAt: completed ? new Date() : null } });
+    return this.prisma.$transaction(async (tx) => {
+      const prev = await tx.todo.findUniqueOrThrow({ where: { id }, include: { reminders: true } });
+      const now = new Date();
+      await tx.todo.update({ where: { id }, data: { completedAt: completed ? now : null } });
       if (completed) {
         await tx.reminder.updateMany({ where: { todoId: id, status: 'pending' }, data: { status: 'cancelled' } });
       } else {
         // 重新打开时，恢复还没到时间的提醒
         await tx.reminder.updateMany({
-          where: { todoId: id, status: 'cancelled', fireAt: { gt: new Date() } },
+          where: { todoId: id, status: 'cancelled', fireAt: { gt: now } },
           data: { status: 'pending' },
         });
       }
-      return tx.todo.findUniqueOrThrow({ where: { id }, include: { reminders: true } });
+
+      // 重复待办首次从未完成→完成时，自动滚动生成下一次实例并继承提醒设置
+      let nextTodo: Todo | null = null;
+      if (completed && !prev.completedAt && prev.repeat !== 'none') {
+        const nextDue = nextRepeatDueAt(prev.dueAt, prev.repeat, now);
+        const created = await tx.todo.create({
+          data: {
+            userId,
+            title: prev.title,
+            note: prev.note,
+            dueAt: nextDue,
+            priority: prev.priority,
+            repeat: prev.repeat,
+          },
+        });
+        const specs: ReminderInput[] = [];
+        const deltaMs = prev.dueAt && nextDue ? nextDue.getTime() - prev.dueAt.getTime() : 0;
+        for (const r of prev.reminders) {
+          if (r.offsetMinutes !== null) {
+            if (nextDue) specs.push({ offsetMinutes: r.offsetMinutes });
+          } else if (deltaMs > 0) {
+            specs.push({ at: new Date(r.fireAt.getTime() + deltaMs).toISOString() });
+          }
+        }
+        if (specs.length) await this.rebuildReminders(tx, created, specs);
+        const nextRow = await tx.todo.findUniqueOrThrow({ where: { id: created.id }, include: { reminders: true } });
+        nextTodo = toTodo(nextRow);
+      }
+
+      const row = await tx.todo.findUniqueOrThrow({ where: { id }, include: { reminders: true } });
+      return { ...toTodo(row), nextTodo };
     });
-    return toTodo(row);
   }
 
   async remove(userId: string, id: string): Promise<void> {
@@ -90,6 +130,7 @@ export class TodoService {
       note: data.note ?? null,
       dueAt: data.dueAt ? new Date(data.dueAt) : null,
       priority: data.priority,
+      repeat: data.repeat,
     };
   }
 

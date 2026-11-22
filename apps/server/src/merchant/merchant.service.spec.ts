@@ -45,7 +45,9 @@ function makeService(autoApprove = true) {
       findUnique: vi.fn(),
       delete: vi.fn(),
     },
+    $transaction: vi.fn(),
   };
+  prisma.$transaction.mockImplementation((fn: (tx: typeof prisma) => unknown) => fn(prisma));
   const env = { MERCHANT_AUTO_APPROVE: autoApprove } as Env;
   return { service: new MerchantService(prisma as unknown as PrismaService, env), prisma };
 }
@@ -118,7 +120,7 @@ describe('MerchantService', () => {
     const { service, prisma } = makeService(true);
     prisma.merchant.findMany.mockResolvedValue([
       makeRow({ id: 'm1', name: '二饭老广煲仔饭', locationText: '二饭三楼' }),
-      makeRow({ id: 'm2', name: '隆江猪脚饭', locationText: '贝岗村' }),
+      makeRow({ id: 'm2', name: '隆江猪脚饭', locationText: '南亭村' }),
     ]);
 
     const hits = await service.findSimilar({ name: '老广煲仔饭', campusId: 'hemc', locationText: '二饭三楼' });
@@ -133,5 +135,16 @@ describe('MerchantService', () => {
 
     const updated = await service.setStatus('00000000-0000-0000-0000-000000000010', 'closed');
     expect(updated.status).toBe('closed');
+  });
+
+  it('导入大学城默认种子包时自动跳过已存在的同名商家', async () => {
+    const { service, prisma } = makeService(true);
+    prisma.merchant.findMany.mockResolvedValue([{ name: '一饭一楼广式烧腊饭' }]);
+    prisma.merchant.create.mockResolvedValue(makeRow());
+
+    const res = await service.seedHemcDefault({ id: 'admin1', role: 'admin' });
+    expect(res.skipped).toBe(1);
+    expect(res.created).toBe(res.total - 1);
+    expect(prisma.merchant.create).toHaveBeenCalledTimes(res.created);
   });
 });

@@ -1,10 +1,40 @@
 import { periodsFor } from './gdut.js';
-import { addDays, daysBetween, parseDate, shanghaiTime } from './time.js';
+import { addDays, daysBetween, formatDate, parseDate, shanghaiDate, shanghaiTime } from './time.js';
 import type { CourseSlot, SemesterInput } from './timetable-schema.js';
 
 export type { CourseInput, CourseSlot, SemesterInput } from './timetable-schema.js';
 
 export { COURSE_COLORS, MAX_WEEKS } from './timetable-schema.js';
+
+/** 找到给定日期所在周或之后最近的星期一 */
+function mondayNearest(year: number, month: number, day: number): string {
+  const base = formatDate({ year, month, day });
+  const wd = parseDate(base).weekday;
+  // 若是周二至周四回退到本周一；周五至周日顺延到下周一
+  const delta = wd === 1 ? 0 : wd <= 4 ? -(wd - 1) : 8 - wd;
+  return addDays(base, delta);
+}
+
+/**
+ * 根据当前北京时间推算广工默认学期（用于首次冷启动自动初始化，不再卡死在「等管理员设置学期」）。
+ * 2–7 月为春季学期（3 月初开学），8–1 月为秋季学期（9 月初开学），默认 20 周。
+ */
+export function defaultGdutSemester(now: Date = new Date()): SemesterInput {
+  const bj = shanghaiDate(now);
+  if (bj.month >= 2 && bj.month <= 7) {
+    return {
+      name: `${bj.year}春季学期`,
+      startDate: mondayNearest(bj.year, 3, 1),
+      totalWeeks: 20,
+    };
+  }
+  const autumnYear = bj.month === 1 ? bj.year - 1 : bj.year;
+  return {
+    name: `${autumnYear}秋季学期`,
+    startDate: mondayNearest(autumnYear, 9, 1),
+    totalWeeks: 20,
+  };
+}
 
 
 export interface Semester extends SemesterInput {

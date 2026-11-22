@@ -138,3 +138,43 @@ export const PinIcon = (p: IconProps) => (
     <circle cx="12" cy="9.5" r="2.5" />
   </Icon>
 );
+export const MapIcon = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M3 6.5 9 4l6 2.5L21 4v13.5L15 20l-6-2.5L3 20V6.5Z" />
+    <path d="M9 4v13.5M15 6.5V20" />
+  </Icon>
+);
+export const LocateIcon = (p: IconProps) => (
+  <Icon {...p}>
+    <circle cx="12" cy="12" r="4" />
+    <path d="M12 2v3M12 19v3M2 12h3M19 12h3" />
+  </Icon>
+);
+export const CompassIcon = (p: IconProps) => (
+  <Icon {...p}>
+    <circle cx="12" cy="12" r="9" />
+    <path d="m15.8 8.2-2.2 5.4-5.4 2.2 2.2-5.4 5.4-2.2Z" />
+  </Icon>
+);
+export const SearchIcon = (p: IconProps) => (
+  <Icon {...p}>
+    <circle cx="11" cy="11" r="6.5" />
+    <path d="m16 16 4.5 4.5" />
+  </Icon>
+);
+export const NavigationIcon = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="m3 11 18-8-8 18-2.5-7.5L3 11Z" />
+  </Icon>
+);
+export const SwapVerticalIcon = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M8 5v14M8 5 5 8M8 5l3 3M16 19V5M16 19l-3-3M16 19l3-3" />
+  </Icon>
+);
+export const DownloadCloudIcon = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M12 13v8M9 18l3 3 3-3" />
+    <path d="M20 16.2A4.5 4.5 0 0 0 18 8h-1.26A7 7 0 1 0 5 14.9" />
+  </Icon>
+);

@@ -13,3 +13,6 @@ coverage
 .vscode/*
 !.vscode/extensions.json
 apps/server/src/generated
+apps/server/ota-bundles/
+docker/ota-bundles/
+docker/backups/

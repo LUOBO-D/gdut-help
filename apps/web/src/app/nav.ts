@@ -1,5 +1,5 @@
 import type { ComponentType } from 'react';
-import { BowlIcon, CalendarIcon, CheckIcon, SunIcon, TrophyIcon, UserIcon } from '../components/icons';
+import { BowlIcon, CalendarIcon, CheckIcon, MapIcon, SunIcon, UserIcon } from '../components/icons';
 
 export interface NavItem {
   to: string;
@@ -7,13 +7,16 @@ export interface NavItem {
   icon: ComponentType<{ size?: number }>;
 }
 
-/** 底部标签栏（手机）/ 侧边栏（电脑）的导航项，顺序也决定页面切换方向。 */
+/**
+ * 底部标签栏（手机）/ 侧边栏（电脑）五大核心支柱：
+ * 今天 · 课表 · 地图（居中一键直达）· 吃什么（含口碑榜与商家库）· 待办
+ */
 export const TABS: NavItem[] = [
   { to: '/', label: '今天', icon: SunIcon },
   { to: '/timetable', label: '课表', icon: CalendarIcon },
+  { to: '/map', label: '地图', icon: MapIcon },
   { to: '/food', label: '吃什么', icon: BowlIcon },
   { to: '/todo', label: '待办', icon: CheckIcon },
-  { to: '/ranking', label: '榜单', icon: TrophyIcon },
 ];
 
 export const ME: NavItem = { to: '/me', label: '我的', icon: UserIcon };

@@ -38,6 +38,9 @@
     <!-- Permissions -->
 
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- 广工校园 3D 地图与校内导航实时 GPS 定位权限 -->
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <!-- 待办提醒要准点弹出。安卓 13 起用 USE_EXACT_ALARM（安装即授予，适合提醒类应用）；
          安卓 12 用 SCHEDULE_EXACT_ALARM（用户可在「闹钟和提醒」里关掉）。
          以后要上架 Google Play 时，需要按商店政策重新评估 USE_EXACT_ALARM -->

@@ -8,6 +8,7 @@ import type {
   MerchantUpdateInput,
   MoodInput,
   MoodLog,
+  SeedImportResult,
   UserPreference,
   UserPreferenceInput,
 } from '@gduthelp/shared';
@@ -120,6 +121,19 @@ export function useAdminMerchantAction() {
       void qc.invalidateQueries({ queryKey: keys.adminMerchantsPrefix });
       void qc.invalidateQueries({ queryKey: keys.merchantsPrefix });
       void qc.invalidateQueries({ queryKey: keys.recommendationsPrefix });
+    },
+  });
+}
+
+export function useSeedHemcMerchants() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => api<SeedImportResult>('/merchants/seed-hemc', { method: 'POST' }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: keys.merchantsPrefix });
+      void qc.invalidateQueries({ queryKey: keys.recommendationsPrefix });
+      void qc.invalidateQueries({ queryKey: keys.adminMerchantsPrefix });
+      void qc.invalidateQueries({ queryKey: keys.rankingsPrefix });
     },
   });
 }

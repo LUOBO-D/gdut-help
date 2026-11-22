@@ -17,6 +17,15 @@ const config: CapacitorConfig = {
       smallIcon: 'ic_stat_notify',
       iconColor: '#ff9a76',
     },
+    // 完全自托管热更新模式：关闭 Capgo 云端自动检查与统计上报，由 src/lib/ota-updater.ts 请求自有后端
+    CapacitorUpdater: {
+      autoUpdate: false,
+      statsUrl: '',
+      appReadyTimeout: 10000,
+      autoDeleteFailed: true,
+      autoDeletePrevious: true,
+      resetWhenUpdate: true,
+    },
   },
 };
 

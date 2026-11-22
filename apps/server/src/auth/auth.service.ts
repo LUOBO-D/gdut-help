@@ -1,6 +1,13 @@
-import { HttpStatus, Inject, Injectable, Logger, OnApplicationBootstrap, OnModuleDestroy } from '@nestjs/common';
+import { HttpStatus, Inject, Injectable, Logger, OnApplicationBootstrap, OnModuleDestroy, Optional } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
-import { ErrorCode, type AuthSession, type UserProfile, type UserRole } from '@gduthelp/shared';
+import {
+  ErrorCode,
+  type AuthConfig,
+  type AuthSession,
+  type LogoutAllResult,
+  type UserProfile,
+  type UserRole,
+} from '@gduthelp/shared';
 import { AppException } from '../common/app.exception.js';
 import { ENV, type Env } from '../config/env.js';
 import type { User } from '../generated/prisma/client.js';
@@ -8,12 +15,16 @@ import { MailService } from '../mail/mail.service.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { toUserProfile } from '../users/users.service.js';
 import {
+  DUMMY_PASSWORD_HASH,
   generateEmailCode,
   generateRefreshToken,
   hashEmailCode,
+  hashPassword,
   hashRefreshToken,
   safeEqualHex,
+  verifyPassword,
 } from './token.util.js';
+import { UserGuardCacheService } from './user-guard-cache.service.js';
 
 export const JWT_ISSUER = 'gduthelp';
 
@@ -23,8 +34,12 @@ export const AUTH_LIMITS = {
   codesPerEmailPerDay: 10,
   codesPerIpPerDay: 30,
   maxAttemptsPerCode: 5,
+  maxPasswordFailures: 5,
+  passwordLockMinutes: 15,
   accessTokenSeconds: 15 * 60,
   refreshTokenDays: 30,
+  /** 单账号最多同时保留的活跃登录设备数，超出后自动吊销最早的会话 */
+  maxActiveSessions: 10,
   /** 轮换后的旧令牌在这段时间内再次出现，视为并发刷新而不是被盗用 */
   refreshReuseGraceSeconds: 10,
 } as const;
@@ -53,19 +68,38 @@ export class RefreshRaceException extends AppException {
 const banned = () => new AppException(ErrorCode.FORBIDDEN, '账号已被封禁', HttpStatus.FORBIDDEN);
 
 const CLEANUP_INTERVAL_MS = 6 * 60 * 60 * 1000;
+const MAX_LOCK_ENTRIES = 2000;
+const PASSWORD_LOCK_MS = AUTH_LIMITS.passwordLockMinutes * 60_000;
+const invalidPassword = () =>
+  new AppException(
+    ErrorCode.UNAUTHORIZED,
+    '邮箱或密码错误（若未设置过密码，请先用邮箱验证码登录）',
+    HttpStatus.UNAUTHORIZED,
+  );
 
 @Injectable()
 export class AuthService implements OnApplicationBootstrap, OnModuleDestroy {
   private readonly logger = new Logger(AuthService.name);
   private cleanupTimer: NodeJS.Timeout | null = null;
   private initialCleanupTimer: NodeJS.Timeout | null = null;
+  /** 按邮箱记录连续密码失败次数与锁定截止时间（内存有界，避免暴力撞库） */
+  private readonly passwordFailures = new Map<string, { count: number; lockUntil: number }>();
 
   constructor(
     private readonly prisma: PrismaService,
     private readonly jwt: JwtService,
     private readonly mail: MailService,
     @Inject(ENV) private readonly env: Env,
+    @Optional() private readonly guardCache?: UserGuardCacheService,
   ) {}
+
+  getAuthConfig(): AuthConfig {
+    return {
+      allowedEmailDomains: this.env.ALLOWED_EMAIL_DOMAINS,
+      inviteRequired: Boolean(this.env.INVITE_CODE),
+      mailDriver: this.env.MAIL_DRIVER,
+    };
+  }
 
   onApplicationBootstrap() {
     if (this.env.NODE_ENV === 'test') return;
@@ -100,8 +134,11 @@ export class AuthService implements OnApplicationBootstrap, OnModuleDestroy {
     }
   }
 
-  async sendEmailCode(rawEmail: string, ip: string): Promise<{ cooldownSeconds: number }> {
+  async sendEmailCode(rawEmail: string, ip: string, inviteCode?: string): Promise<{ cooldownSeconds: number }> {
     const email = rawEmail.trim().toLowerCase();
+    this.assertEmailDomainAllowed(email);
+    await this.assertInviteCodeIfNew(email, inviteCode);
+
     const now = Date.now();
     const dayAgo = new Date(now - DAY_MS);
 
@@ -147,8 +184,160 @@ export class AuthService implements OnApplicationBootstrap, OnModuleDestroy {
     return { cooldownSeconds: AUTH_LIMITS.resendCooldownSeconds };
   }
 
-  async loginWithEmailCode(rawEmail: string, code: string, userAgent?: string): Promise<IssuedSession> {
+  async loginWithEmailCode(rawEmail: string, code: string, userAgent?: string, inviteCode?: string): Promise<IssuedSession> {
     const email = rawEmail.trim().toLowerCase();
+    this.assertEmailDomainAllowed(email);
+    await this.assertInviteCodeIfNew(email, inviteCode);
+    await this.verifyAndConsumeEmailCode(email, code);
+
+    const user = await this.findOrCreateUser(email);
+    if (user.status === 'banned') throw banned();
+    this.passwordFailures.delete(email);
+    return this.issueSession(user, userAgent);
+  }
+
+  async loginWithPassword(rawEmail: string, password: string, userAgent?: string): Promise<IssuedSession> {
+    const email = rawEmail.trim().toLowerCase();
+    this.assertEmailDomainAllowed(email);
+
+    const now = Date.now();
+    const fail = this.passwordFailures.get(email);
+    if (fail && fail.lockUntil > now) {
+      const remainMin = Math.max(1, Math.ceil((fail.lockUntil - now) / 60_000));
+      throw new AppException(
+        ErrorCode.TOO_MANY_REQUESTS,
+        `密码错误次数过多，请 ${remainMin} 分钟后再试或改用邮箱验证码登录`,
+        HttpStatus.TOO_MANY_REQUESTS,
+      );
+    }
+
+    const user = await this.prisma.user.findUnique({ where: { email } });
+    const ok = await verifyPassword(password, user?.passwordHash ?? DUMMY_PASSWORD_HASH);
+    if (!user || !user.passwordHash || !ok) {
+      this.recordPasswordFailure(email, now);
+      throw invalidPassword();
+    }
+    if (user.status === 'banned') throw banned();
+
+    this.passwordFailures.delete(email);
+    // 管理员列表提升兼容
+    const promoted =
+      this.env.ADMIN_EMAILS.includes(email) && user.role !== 'admin'
+        ? await this.prisma.user.update({ where: { id: user.id }, data: { role: 'admin' } })
+        : user;
+    return this.issueSession(promoted, userAgent);
+  }
+
+  async registerWithPassword(
+    input: { email: string; code: string; password: string; nickname?: string; inviteCode?: string },
+    userAgent?: string,
+  ): Promise<IssuedSession> {
+    const email = input.email.trim().toLowerCase();
+    this.assertEmailDomainAllowed(email);
+    await this.assertInviteCodeIfNew(email, input.inviteCode);
+    await this.verifyAndConsumeEmailCode(email, input.code);
+
+    const passwordHash = await hashPassword(input.password);
+    const now = new Date();
+    const existing = await this.prisma.user.findUnique({ where: { email } });
+    let user: User;
+    if (existing) {
+      if (existing.status === 'banned') throw banned();
+      user = await this.prisma.user.update({
+        where: { id: existing.id },
+        data: {
+          passwordHash,
+          passwordUpdatedAt: now,
+          ...(input.nickname ? { nickname: input.nickname } : {}),
+          ...(this.env.ADMIN_EMAILS.includes(email) && existing.role !== 'admin' ? { role: 'admin' } : {}),
+        },
+      });
+    } else {
+      const shouldBeAdmin = this.env.ADMIN_EMAILS.includes(email);
+      user = await this.prisma.user.create({
+        data: {
+          email,
+          nickname: input.nickname || email.split('@')[0]!.slice(0, 20),
+          role: shouldBeAdmin ? 'admin' : 'user',
+          passwordHash,
+          passwordUpdatedAt: now,
+        },
+      });
+    }
+
+    this.passwordFailures.delete(email);
+    return this.issueSession(user, userAgent);
+  }
+
+  async resetPassword(input: { email: string; code: string; newPassword: string }): Promise<void> {
+    const email = input.email.trim().toLowerCase();
+    this.assertEmailDomainAllowed(email);
+    await this.verifyAndConsumeEmailCode(email, input.code);
+
+    const user = await this.prisma.user.findUnique({ where: { email } });
+    if (!user) throw new AppException(ErrorCode.NOT_FOUND, '该邮箱尚未注册', HttpStatus.NOT_FOUND);
+    if (user.status === 'banned') throw banned();
+
+    const passwordHash = await hashPassword(input.newPassword);
+    await this.prisma.user.update({
+      where: { id: user.id },
+      data: { passwordHash, passwordUpdatedAt: new Date() },
+    });
+    this.passwordFailures.delete(email);
+    // 重置密码后立即吊销该账号所有旧设备会话
+    await this.revokeAllForUser(user.id);
+  }
+
+  async changePassword(
+    userId: string,
+    input: { currentPassword?: string; newPassword: string },
+  ): Promise<UserProfile> {
+    const user = await this.prisma.user.findUnique({ where: { id: userId } });
+    if (!user) throw new AppException(ErrorCode.UNAUTHORIZED, '账号不存在', HttpStatus.UNAUTHORIZED);
+    if (user.status === 'banned') throw banned();
+
+    if (user.passwordHash) {
+      if (!input.currentPassword) {
+        throw new AppException(ErrorCode.VALIDATION_FAILED, '请输入当前登录密码', HttpStatus.BAD_REQUEST);
+      }
+      const ok = await verifyPassword(input.currentPassword, user.passwordHash);
+      if (!ok) {
+        throw new AppException(ErrorCode.UNAUTHORIZED, '当前密码不正确', HttpStatus.UNAUTHORIZED);
+      }
+    }
+
+    const passwordHash = await hashPassword(input.newPassword);
+    const updated = await this.prisma.user.update({
+      where: { id: userId },
+      data: { passwordHash, passwordUpdatedAt: new Date() },
+    });
+    return toUserProfile(updated);
+  }
+
+  private assertEmailDomainAllowed(email: string): void {
+    const domains = this.env.ALLOWED_EMAIL_DOMAINS;
+    if (!domains.length || this.env.ADMIN_EMAILS.includes(email)) return;
+    const domain = email.split('@')[1]?.toLowerCase() ?? '';
+    if (!domains.includes(domain)) {
+      const hint = domains.map((d) => `@${d}`).join(' / ');
+      throw new AppException(
+        ErrorCode.FORBIDDEN,
+        `当前仅开放校园邮箱（${hint}）登录`,
+        HttpStatus.FORBIDDEN,
+      );
+    }
+  }
+
+  private async assertInviteCodeIfNew(email: string, inviteCode?: string): Promise<void> {
+    if (!this.env.INVITE_CODE || this.env.ADMIN_EMAILS.includes(email)) return;
+    const existing = await this.prisma.user.findUnique({ where: { email }, select: { id: true } });
+    if (existing) return;
+    if (!inviteCode || inviteCode.trim().toLowerCase() !== this.env.INVITE_CODE.toLowerCase()) {
+      throw new AppException(ErrorCode.FORBIDDEN, '新用户注册需要填写正确的校园邀请码', HttpStatus.FORBIDDEN);
+    }
+  }
+
+  private async verifyAndConsumeEmailCode(email: string, code: string): Promise<void> {
     const record = await this.prisma.emailCode.findFirst({
       where: { email, consumedAt: null, expiresAt: { gt: new Date() } },
       orderBy: { createdAt: 'desc' },
@@ -166,10 +355,17 @@ export class AuthService implements OnApplicationBootstrap, OnModuleDestroy {
       data: { consumedAt: new Date() },
     });
     if (consumed.count === 0) throw invalidCode();
+  }
 
-    const user = await this.findOrCreateUser(email);
-    if (user.status === 'banned') throw banned();
-    return this.issueSession(user, userAgent);
+  private recordPasswordFailure(email: string, now: number): void {
+    const prev = this.passwordFailures.get(email);
+    const nextCount = prev && prev.lockUntil <= now ? (prev.count >= AUTH_LIMITS.maxPasswordFailures ? 1 : prev.count + 1) : (prev?.count ?? 0) + 1;
+    const lockUntil = nextCount >= AUTH_LIMITS.maxPasswordFailures ? now + PASSWORD_LOCK_MS : 0;
+    if (this.passwordFailures.size >= MAX_LOCK_ENTRIES && !this.passwordFailures.has(email)) {
+      const oldest = this.passwordFailures.keys().next().value;
+      if (oldest !== undefined) this.passwordFailures.delete(oldest);
+    }
+    this.passwordFailures.set(email, { count: nextCount, lockUntil });
   }
 
   async refresh(rawToken: string | undefined, userAgent?: string): Promise<IssuedSession> {
@@ -213,8 +409,19 @@ export class AuthService implements OnApplicationBootstrap, OnModuleDestroy {
     });
   }
 
+  /** 退出该账号在全部设备上的登录，并立即令已有 access token 失效 */
+  async logoutAll(userId: string): Promise<LogoutAllResult> {
+    const res = await this.prisma.refreshToken.updateMany({
+      where: { userId, revokedAt: null },
+      data: { revokedAt: new Date() },
+    });
+    this.guardCache?.markRevokedNow(userId);
+    return { revokedCount: res.count };
+  }
+
   private async revokeAllForUser(userId: string) {
     await this.prisma.refreshToken.updateMany({ where: { userId, revokedAt: null }, data: { revokedAt: new Date() } });
+    this.guardCache?.markRevokedNow(userId);
   }
 
   private async findOrCreateUser(email: string): Promise<User> {
@@ -248,7 +455,8 @@ export class AuthService implements OnApplicationBootstrap, OnModuleDestroy {
       issuer: JWT_ISSUER,
     });
     const refreshToken = generateRefreshToken();
-    const refreshExpiresAt = new Date(Date.now() + AUTH_LIMITS.refreshTokenDays * DAY_MS);
+    const now = new Date();
+    const refreshExpiresAt = new Date(now.getTime() + AUTH_LIMITS.refreshTokenDays * DAY_MS);
 
     await this.prisma.refreshToken.create({
       data: {
@@ -258,6 +466,20 @@ export class AuthService implements OnApplicationBootstrap, OnModuleDestroy {
         expiresAt: refreshExpiresAt,
       },
     });
+
+    // 控制单账号活跃设备上限，超出 maxActiveSessions 的最早会话自动吊销
+    const overflow = await this.prisma.refreshToken.findMany({
+      where: { userId: user.id, revokedAt: null, expiresAt: { gt: now } },
+      orderBy: { createdAt: 'desc' },
+      skip: AUTH_LIMITS.maxActiveSessions,
+      select: { id: true },
+    });
+    if (overflow.length) {
+      await this.prisma.refreshToken.updateMany({
+        where: { id: { in: overflow.map((r) => r.id) }, revokedAt: null },
+        data: { revokedAt: now },
+      });
+    }
 
     const profile: UserProfile = toUserProfile(user);
     return {

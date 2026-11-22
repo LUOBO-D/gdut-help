@@ -60,6 +60,9 @@ export const timetableImportSchema = z.object({
     .max(60),
   /** 以前导入、这次没有的课是否删除 */
   removeMissing: z.boolean().default(true),
+  /** 可选：从教务系统读到的第 1 周星期一日期（用于在尚未校准时自动对齐学期开学日期） */
+  weekOneMonday: isoDate.refine((d) => parseDate(d).weekday === 1, { error: '开学日期需要是周一' }).optional(),
+  semesterName: z.string().trim().min(1).max(30).optional(),
 });
 export type TimetableImportRequest = z.input<typeof timetableImportSchema>;
 
@@ -68,4 +71,25 @@ export interface TimetableImportResult {
   changed: number;
   removed: number;
   unchanged: number;
+}
+
+/** 6 位课表分享码（去除了易混淆的 0/O/1/I/L） */
+export const timetableShareCodeSchema = z
+  .string()
+  .trim()
+  .toUpperCase()
+  .regex(/^[A-Z2-9]{6}$/, { error: '请输入 6 位有效课表分享码' });
+
+export interface TimetableShareCreated {
+  code: string;
+  courseCount: number;
+  semesterName: string;
+  expiresAt: string;
+}
+
+export interface TimetableSharePayload {
+  code: string;
+  semesterName: string;
+  courses: z.output<typeof timetableImportSchema>['courses'];
+  expiresAt: string;
 }

@@ -1,12 +1,27 @@
 import { AnimatePresence, motion } from 'motion/react';
 import { useAuth } from '../lib/auth-store';
+import { useOfflineQueue } from '../lib/offline-queue';
 import { useOnline } from '../lib/use-online';
 
-/** 断网时顶部提示：显示的是缓存数据，修改暂时无法保存 */
+/** 断网或存在待同步离线操作时顶部轻提示 */
 export function OfflineBanner() {
   const online = useOnline();
   const offlineSession = useAuth((s) => s.offline);
-  const show = !online || offlineSession;
+  const pendingCount = useOfflineQueue((s) => s.pendingCount);
+  const syncing = useOfflineQueue((s) => s.syncing);
+  const show = !online || offlineSession || syncing || pendingCount > 0;
+
+  let text = '离线中：可正常记待办与勾选，联网后自动同步';
+  if (!online) {
+    text = pendingCount > 0 ? `离线中：已有 ${pendingCount} 条待办操作待同步` : '离线中：可正常记待办与勾选，联网后自动同步';
+  } else if (syncing) {
+    text = `正在同步 ${pendingCount || ''} 条离线操作…`;
+  } else if (offlineSession) {
+    text = '正在重新连接…';
+  } else if (pendingCount > 0) {
+    text = `有 ${pendingCount} 条离线操作等待同步`;
+  }
+
   return (
     <AnimatePresence>
       {show && (
@@ -17,7 +32,7 @@ export function OfflineBanner() {
           animate={{ y: 0, opacity: 1 }}
           exit={{ y: -60, opacity: 0 }}
         >
-          {online ? '正在重新连接…' : '离线中：显示的是上次的数据，修改暂时无法保存'}
+          {text}
         </motion.div>
       )}
     </AnimatePresence>

@@ -21,8 +21,8 @@ export interface Sky3DSettings {
 }
 
 export const SKY3D_SETTINGS: Record<Exclude<Quality, 'low'>, Sky3DSettings> = {
-  high: { dpr: 2, rain: 2000, snow: 1200, stars: 1200, clouds: 10 },
-  medium: { dpr: 1.5, rain: 600, snow: 400, stars: 500, clouds: 6 },
+  high: { dpr: 1.5, rain: 1600, snow: 1000, stars: 1000, clouds: 8 },
+  medium: { dpr: 1, rain: 500, snow: 350, stars: 450, clouds: 5 },
 };
 
 /** 连续 3 秒平均帧率低于这个值时自动降一档 */

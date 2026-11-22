@@ -1,14 +1,31 @@
-import { addDays, dateOf, formatHm, parseDate, periodsFor, sessionsOn, today, weekOf, type ClassSession, type TimetableData } from '@gduthelp/shared';
-import { AnimatePresence, motion, type PanInfo } from 'motion/react';
-import { lazy, Suspense, useState } from 'react';
-import { Link } from 'react-router';
+import {
+  addDays,
+  dateOf,
+  formatHm,
+  matchCampusBuilding,
+  parseDate,
+  periodsFor,
+  sessionsOn,
+  today,
+  weekOf,
+  type ClassSession,
+  type TimetableData,
+  type TimetableShareCreated,
+} from '@gduthelp/shared';
+import { useMutation } from '@tanstack/react-query';
+import { motion, type PanInfo } from 'motion/react';
+import { lazy, Suspense, useMemo, useState } from 'react';
+import { Link, useNavigate } from 'react-router';
 import { Button } from '../../components/Button';
 import { GlassCard } from '../../components/GlassCard';
-import { ChevronLeftIcon, ChevronRightIcon, PinIcon, PlusIcon } from '../../components/icons';
+import { ChevronLeftIcon, ChevronRightIcon, NavigationIcon, PinIcon, PlusIcon } from '../../components/icons';
 import { PageHeader } from '../../components/PageHeader';
+import { Sheet } from '../../components/Sheet';
 import { CardSkeleton } from '../../components/Skeleton';
+import { api, ApiError } from '../../lib/api';
 import { useAuth } from '../../lib/auth-store';
 import { useTimetable } from '../../lib/queries';
+import { toast } from '../../lib/toast-store';
 import { useNow } from '../../lib/use-now';
 import { pressable, spring } from '../../motion/presets';
 import { CourseEditor, type CourseDraft } from './CourseEditor';
@@ -36,6 +53,23 @@ export function TimetablePage() {
   const [importing, setImporting] = useState(false);
   /** 打开过一次后保持挂载，关闭时才有收起动画 */
   const [importLoaded, setImportLoaded] = useState(false);
+  const [shareInfo, setShareInfo] = useState<TimetableShareCreated | null>(null);
+
+  const shareMutation = useMutation({
+    mutationFn: () => api<TimetableShareCreated>('/timetable/share', { method: 'POST' }),
+    onSuccess: (res) => setShareInfo(res),
+    onError: (err) => toast.error(err instanceof ApiError ? err.message : '生成分享码失败'),
+  });
+
+  const copyShareCode = async () => {
+    if (!shareInfo) return;
+    try {
+      await navigator.clipboard.writeText(shareInfo.code);
+      toast.success(`已复制分享码 ${shareInfo.code}`);
+    } catch {
+      toast.info(`分享码：${shareInfo.code}`);
+    }
+  };
 
   if (isPending && !data) {
     return (
@@ -60,7 +94,7 @@ export function TimetablePage() {
               填写开学日期和总周数。
             </>
           ) : (
-            '管理员还没有设置当前学期，设置好后就能添加课程。'
+            '正在初始化当前学期，稍候刷新即可导入或添加课程。'
           )}
         </GlassCard>
       </>
@@ -93,6 +127,11 @@ export function TimetablePage() {
         subtitle={`${semester.name} · ${currentWeek ? `本周第 ${currentWeek} 周` : todayStr < semester.startDate ? '还没开学' : '学期已结束'}`}
         action={
           <div className="flex gap-2">
+            {data!.courses.length > 0 && (
+              <Button variant="ghost" className="h-10 px-3 text-sm" loading={shareMutation.isPending} onClick={() => shareMutation.mutate()}>
+                分享
+              </Button>
+            )}
             <Button variant="ghost" className="h-10 px-3 text-sm" onClick={openImport}>
               导入
             </Button>
@@ -160,6 +199,29 @@ export function TimetablePage() {
       {data!.courses.length === 0 && <p className="mt-3 text-center text-sm text-fg-muted">点右上角「添加」录入第一门课，或者「导入」教务系统的课表</p>}
 
       <CourseEditor draft={draft} semester={semester} onClose={() => setDraft(null)} />
+      <Sheet open={Boolean(shareInfo)} onClose={() => setShareInfo(null)} title="分享本学期课表">
+        {shareInfo && (
+          <div className="space-y-4 pb-2 text-center">
+            <p className="text-sm text-fg-muted">
+              把下面 6 位分享码发给同班或室友，在「课表 → 导入」里输入即可 10 秒复制这 {shareInfo.courseCount} 门课（不含你的个人信息）。
+            </p>
+            <div className="surface-subtle rounded-3xl py-5">
+              <p className="font-num text-3xl font-bold tracking-[0.28em] text-accent tabular-nums">{shareInfo.code}</p>
+              <p className="mt-2 text-xs text-fg-muted">
+                {shareInfo.semesterName} · 7 天内有效
+              </p>
+            </div>
+            <div className="flex gap-2">
+              <Button className="flex-1" onClick={() => void copyShareCode()}>
+                复制分享码
+              </Button>
+              <Button variant="ghost" onClick={() => setShareInfo(null)}>
+                关闭
+              </Button>
+            </div>
+          </div>
+        )}
+      </Sheet>
       {importLoaded && (
         <Suspense fallback={null}>
           <ImportSheet open={importing} onClose={() => setImporting(false)} semester={semester} courses={data!.courses} />
@@ -205,6 +267,23 @@ function WeekStrip({
   onSwipe: (dir: 1 | -1) => void;
 }) {
   const semester = data.semester!;
+  const days = useMemo(
+    () =>
+      WEEKDAY_LABEL.map((label, i) => {
+        const wd = i + 1;
+        const date = dateOf(semester, week, wd);
+        const parsed = parseDate(date);
+        return {
+          label,
+          wd,
+          date,
+          month: parsed.month,
+          day: parsed.day,
+          hasClass: sessionsOn(data, date, campusId).length > 0,
+        };
+      }),
+    [campusId, data, semester, week],
+  );
   const onDragEnd = (_: unknown, info: PanInfo) => {
     if (Math.abs(info.offset.x) > 60 && Math.abs(info.offset.x) > Math.abs(info.offset.y)) onSwipe(info.offset.x < 0 ? 1 : -1);
   };
@@ -217,16 +296,10 @@ function WeekStrip({
         dragConstraints={{ left: 0, right: 0 }}
         dragElastic={0.25}
         onDragEnd={onDragEnd}
-        initial={{ opacity: 0.4 }}
-        animate={{ opacity: 1 }}
-        transition={{ duration: 0.2 }}
       >
-        {WEEKDAY_LABEL.map((label, i) => {
-          const wd = i + 1;
-          const date = dateOf(semester, week, wd);
+        {days.map(({ label, wd, date, month, day, hasClass }) => {
           const active = wd === selected;
           const isToday = date === todayStr;
-          const hasClass = sessionsOn(data, date, campusId).length > 0;
           return (
             <button
               key={label}
@@ -234,11 +307,11 @@ function WeekStrip({
               onClick={() => onSelect(wd)}
               className="relative flex flex-col items-center gap-0.5 rounded-2xl py-2"
               aria-pressed={active}
-              aria-label={`周${label} ${parseDate(date).month}月${parseDate(date).day}日${hasClass ? '，有课' : ''}`}
+              aria-label={`周${label} ${month}月${day}日${hasClass ? '，有课' : ''}`}
             >
               {active && <motion.span layoutId="timetable-day" className="absolute inset-0 rounded-2xl bg-accent shadow-[0_6px_18px_-6px_var(--accent)]" transition={spring.snappy} />}
               <span className={`relative text-xs ${active ? 'text-accent-fg' : isToday ? 'font-semibold text-accent' : 'text-fg-muted'}`}>{label}</span>
-              <span className={`relative text-lg font-semibold tabular-nums ${active ? 'text-accent-fg' : isToday ? 'text-accent' : ''}`}>{parseDate(date).day}</span>
+              <span className={`relative text-lg font-semibold tabular-nums ${active ? 'text-accent-fg' : isToday ? 'text-accent' : ''}`}>{day}</span>
               <span className={`relative size-1.5 rounded-full ${hasClass ? (active ? 'bg-accent-fg' : 'bg-accent') : 'bg-transparent'}`} aria-hidden />
             </button>
           );
@@ -262,6 +335,7 @@ function DayList({
   now: Date;
   onOpen: (courseId: string) => void;
 }) {
+  const navigate = useNavigate();
   const d = parseDate(date);
   const label = date === todayStr ? '今天' : date === addDays(todayStr, 1) ? '明天' : `周${WEEKDAY_LABEL[d.weekday - 1]}`;
   return (
@@ -273,24 +347,20 @@ function DayList({
         <GlassCard className="p-6 text-center text-sm text-fg-muted">这天没有课，好好休息</GlassCard>
       ) : (
         <ul className="space-y-2.5">
-          <AnimatePresence initial={false}>
-            {sessions.map((s, i) => {
-              const start = new Date(s.start);
-              const end = new Date(s.end);
-              const ongoing = now >= start && now < end;
-              const done = now >= end;
-              return (
-                <motion.li
-                  key={`${s.courseId}-${s.periodStart}`}
-                  initial={{ opacity: 0, y: 8 }}
-                  animate={{ opacity: done ? 0.55 : 1, y: 0 }}
-                  transition={{ ...spring.snappy, delay: i * 0.03 }}
-                >
+          {sessions.map((s) => {
+            const start = new Date(s.start);
+            const end = new Date(s.end);
+            const ongoing = now >= start && now < end;
+            const done = now >= end;
+            const mapped = s.location ? matchCampusBuilding(s.location) : null;
+            return (
+              <li key={`${s.courseId}-${s.periodStart}`} className={done ? 'opacity-55' : undefined}>
+                <div className={`glass flex w-full items-center gap-2 rounded-3xl p-4 ${ongoing ? 'ring-2 ring-accent' : ''}`}>
                   <motion.button
                     type="button"
                     {...pressable}
                     onClick={() => onOpen(s.courseId)}
-                    className={`glass flex w-full items-center gap-3 rounded-3xl p-4 text-left ${ongoing ? 'ring-2 ring-accent' : ''}`}
+                    className="flex min-w-0 flex-1 items-center gap-3 text-left"
                   >
                     <div className="w-12 shrink-0 text-right tabular-nums">
                       <p className="text-[17px] font-semibold leading-tight">{formatHm(start)}</p>
@@ -313,12 +383,23 @@ function DayList({
                         </span>
                       </p>
                     </div>
-                    {ongoing && <span className="shrink-0 rounded-full bg-accent px-2 py-0.5 text-xs font-semibold text-accent-fg">上课中</span>}
                   </motion.button>
-                </motion.li>
-              );
-            })}
-          </AnimatePresence>
+                  {ongoing && <span className="shrink-0 rounded-full bg-accent px-2 py-0.5 text-xs font-semibold text-accent-fg">上课中</span>}
+                  {mapped && s.location && (
+                    <button
+                      type="button"
+                      onClick={() => void navigate(`/map?q=${encodeURIComponent(s.location!)}`)}
+                      title={`在 3D 校园地图中导航到 ${mapped.name}`}
+                      aria-label={`导航到 ${s.location}`}
+                      className="surface-subtle surface-subtle-hover grid size-9 shrink-0 place-items-center rounded-full text-accent"
+                    >
+                      <NavigationIcon size={16} />
+                    </button>
+                  )}
+                </div>
+              </li>
+            );
+          })}
         </ul>
       )}
     </section>
