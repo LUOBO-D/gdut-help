@@ -55,6 +55,7 @@ export function TodoPage() {
 
   const [quickTitle, setQuickTitle] = useState('');
   const [disableQuickParse, setDisableQuickParse] = useState(false);
+  const [showAllDone, setShowAllDone] = useState(false);
   const [editing, setEditing] = useState<Todo | null>(null);
   const [open, setOpen] = useState(false);
 
@@ -169,14 +170,28 @@ export function TodoPage() {
       )}
 
       <div className="space-y-5">
-        {grouped.map((g) => (
+        {grouped.map((g) => {
+          const collapsedDone = g.key === 'done' && !showAllDone && g.items.length > 3;
+          const visibleItems = collapsedDone ? g.items.slice(0, 3) : g.items;
+          return (
           <section key={g.key}>
-            <h2 className={`mb-2 px-1 text-sm font-semibold ${g.key === 'overdue' ? 'text-danger' : 'text-fg-muted'}`}>
-              {g.label} · {g.items.length}
-            </h2>
+            <div className="mb-2 flex items-center justify-between px-1">
+              <h2 className={`text-sm font-semibold ${g.key === 'overdue' ? 'text-danger' : 'text-fg-muted'}`}>
+                {g.label} · {g.items.length}
+              </h2>
+              {g.key === 'done' && g.items.length > 3 && (
+                <button
+                  type="button"
+                  onClick={() => setShowAllDone((v) => !v)}
+                  className="text-xs font-medium text-accent hover:underline"
+                >
+                  {showAllDone ? '收起' : `展开其余 ${g.items.length - 3} 项`}
+                </button>
+              )}
+            </div>
             <GlassCard className="divide-y divide-current/10 px-4">
               <AnimatePresence initial={false}>
-                {g.items.map((t) => {
+                {visibleItems.map((t) => {
                   const done = !!t.completedAt;
                   const nextReminder = t.reminders.find((r) => r.status === 'pending');
                   return (
@@ -248,7 +263,8 @@ export function TodoPage() {
               </AnimatePresence>
             </GlassCard>
           </section>
-        ))}
+          );
+        })}
       </div>
 
       <motion.button

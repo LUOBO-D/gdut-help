@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<network-security-config>
+    <base-config cleartextTrafficPermitted="false" />
+    <!-- 仅放行广工校园内网体测查询域名使用明文 HTTP，其余全部域名严格强制 HTTPS -->
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="true">tzcs.gdut.edu.cn</domain>
+    </domain-config>
+</network-security-config>

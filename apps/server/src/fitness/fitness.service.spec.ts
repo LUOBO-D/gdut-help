@@ -35,6 +35,7 @@ function makeHarness() {
     findUnique: vi.fn(),
     findFirst: vi.fn(),
     create: vi.fn(),
+    upsert: vi.fn(),
     update: vi.fn(),
     delete: vi.fn(),
   };
@@ -150,5 +151,39 @@ describe('FitnessService', () => {
     await expect(service.remove('u1', '00000000-0000-0000-0000-000000000099')).rejects.toMatchObject({
       errorCode: 'NOT_FOUND',
     });
+  });
+
+  it('只查询与幂等覆盖当前学年体测成绩（getCurrent / upsertCurrent）', async () => {
+    const { service, fitnessRecord } = makeHarness();
+    fitnessRecord.findUnique.mockResolvedValue(makeRow({ academicYear: '2026-2027', gradeYear: 3 }));
+    const cur = await service.getCurrent('u1', '2026-2027');
+    expect(cur.academicYear).toBe('2026-2027');
+    expect(cur.record?.gradeYear).toBe(3);
+    expect(cur.syncedAt).toBeTruthy();
+
+    fitnessRecord.upsert.mockResolvedValue(makeRow({ academicYear: '2026-2027', source: 'import' }));
+    const saved = await service.upsertCurrent(
+      'u1',
+      {
+        academicYear: '2026-2027',
+        gradeYear: 3,
+        gender: 'male',
+        heightCm: 175,
+        weightKg: 65,
+        lungCapacityMl: 4500,
+        sprint50mSec: 7.1,
+        sitAndReachCm: 17,
+        standingLongJumpCm: 248,
+        strengthCount: 15,
+        enduranceSec: 220,
+        exempt: false,
+        officialTotal: null,
+        testedAt: null,
+        note: null,
+      },
+      'import',
+    );
+    expect(saved.source).toBe('import');
+    expect(fitnessRecord.upsert).toHaveBeenCalledTimes(1);
   });
 });

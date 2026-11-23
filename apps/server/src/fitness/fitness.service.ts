@@ -1,13 +1,16 @@
 import { HttpStatus, Injectable } from '@nestjs/common';
 import {
+  defaultAcademicYear,
   diffFitnessImport,
   ErrorCode,
   fitnessImportSchema,
   fitnessRecordInputSchema,
+  type CurrentFitnessData,
   type FitnessData,
   type FitnessGradeYear,
   type FitnessImportResult,
   type FitnessRecord,
+  type FitnessSource,
 } from '@gduthelp/shared';
 import type { z } from 'zod';
 import { AppException } from '../common/app.exception.js';
@@ -69,6 +72,40 @@ export class FitnessService {
       orderBy: [{ academicYear: 'desc' }, { gradeYear: 'desc' }],
     });
     return { records: rows.map(toFitnessRecord) };
+  }
+
+  /** 查询当前学年的体测成绩（聚焦本学年，不再堆叠往年记录） */
+  async getCurrent(userId: string, academicYear: string = defaultAcademicYear()): Promise<CurrentFitnessData> {
+    const row = await this.prisma.fitnessRecord.findUnique({
+      where: { userId_academicYear: { userId, academicYear } },
+    });
+    return {
+      academicYear,
+      record: row ? toFitnessRecord(row) : null,
+      syncedAt: row ? row.updatedAt.toISOString() : null,
+    };
+  }
+
+  /** 幂等保存/覆盖当前学年体测成绩（支持直连查询自动更新与手动修改） */
+  async upsertCurrent(
+    userId: string,
+    data: FitnessRecordInputData,
+    source: FitnessSource = 'manual',
+  ): Promise<FitnessRecord> {
+    const payload = toDbPayload(data);
+    const row = await this.prisma.fitnessRecord.upsert({
+      where: { userId_academicYear: { userId, academicYear: data.academicYear } },
+      create: {
+        userId,
+        ...payload,
+        source,
+      },
+      update: {
+        ...payload,
+        source,
+      },
+    });
+    return toFitnessRecord(row);
   }
 
   async create(userId: string, data: FitnessRecordInputData): Promise<FitnessRecord> {

@@ -219,8 +219,6 @@ export function FoodPage() {
 
       {view === 'recommend' ? (
         <div className="space-y-4">
-          <MoodCard moodLog={moodQuery.data} />
-
           <GlassCard className="p-5">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div className="surface-subtle inline-flex rounded-full p-1">
@@ -369,6 +367,8 @@ export function FoodPage() {
               </div>
             )}
           </GlassCard>
+
+          <MoodCard moodLog={moodQuery.data} />
 
           {historyQuery.data && historyQuery.data.length > 0 && (
             <GlassCard className="p-4">

@@ -33,7 +33,7 @@ export function SideNav() {
           <ul>
             <SideNavLink item={ME} shortcut="0" />
           </ul>
-          <p className="mt-2 px-3 text-[11px] text-fg-muted opacity-75">快捷键：1–5 切页 · N 新建待办</p>
+          <p className="mt-2 px-3 text-[11px] text-fg-muted opacity-75">快捷键：1–6 切页 · N 新建待办</p>
         </div>
       </div>
     </nav>

@@ -1,7 +1,9 @@
 import {
   changePasswordSchema,
+  computeGpaSummary,
+  defaultAcademicYear,
   deleteAccountSchema,
-  estimateGraduationFitness,
+  evaluateFitnessRecord,
   FITNESS_LEVEL_LABELS,
   today,
   updateProfileSchema,
@@ -21,7 +23,7 @@ import { api, ApiError, deleteAccount, logout, logoutAll } from '../../lib/api';
 import { useAuth } from '../../lib/auth-store';
 import { useOtaStore } from '../../lib/ota-store';
 import { DEFAULT_API_ORIGIN, getApiOrigin, isNative, normalizeApiOrigin, setApiOriginOverride } from '../../lib/platform';
-import { useFitnessRecords, usePreferences } from '../../lib/queries';
+import { useCurrentFitness, useGrades, usePreferences } from '../../lib/queries';
 import { SCENE_STYLES, SCENES, type Scene } from '../../lib/scene';
 import { toast } from '../../lib/toast-store';
 import { useUi } from '../../lib/ui-store';
@@ -39,15 +41,22 @@ export function MePage() {
   const [loggingOut, setLoggingOut] = useState(false);
   const [prefOpen, setPrefOpen] = useState(false);
   const prefQuery = usePreferences();
-  const fitnessQuery = useFitnessRecords();
+  const gradesQuery = useGrades();
+  const fitnessQuery = useCurrentFitness(defaultAcademicYear());
   if (!user) return null;
 
-  const fitnessRecords = fitnessQuery.data?.records ?? [];
-  const fitnessEst = estimateGraduationFitness(fitnessRecords);
-  const fitnessSummary =
-    fitnessEst.score !== null
-      ? `已收录 ${fitnessRecords.length} 学年 · ${fitnessEst.hasSenior ? '毕业总评' : '毕业估算'} ${fitnessEst.score.toFixed(1)} 分（${FITNESS_LEVEL_LABELS[fitnessEst.level]}）`
-      : '收录历年体测成绩，自动按国家标准算分与估算毕业总评';
+  const gpaSummary = computeGpaSummary(gradesQuery.data?.grades ?? []);
+  const currentFitness = fitnessQuery.data?.record ?? null;
+  const fitnessEval = currentFitness ? evaluateFitnessRecord(currentFitness) : null;
+  const scoresSummaryParts: string[] = [];
+  if (gpaSummary.courseCount > 0) {
+    scoresSummaryParts.push(`平均绩点 ${gpaSummary.gpa.toFixed(2)}`);
+  }
+  if (fitnessEval && (fitnessEval.completedCount > 0 || currentFitness?.exempt)) {
+    scoresSummaryParts.push(`本学年体测 ${fitnessEval.totalScore.toFixed(1)} 分（${FITNESS_LEVEL_LABELS[fitnessEval.level]}）`);
+  }
+  const scoresSummary =
+    scoresSummaryParts.length > 0 ? scoresSummaryParts.join(' · ') : '查看广工 5.0 绩点与当前学年体测，支持自动更新';
 
   const pref = prefQuery.data;
   const prefSummary =
@@ -65,63 +74,76 @@ export function MePage() {
 
   return (
     <>
-      <PageHeader title="我的" />
-      <div className="space-y-4">
-        <ProfileCard user={user} />
-        <CampusPicker />
-        <GlassCard className="p-5">
-          <Link to="/fitness" className="flex w-full items-center justify-between gap-3 text-left">
-            <div className="min-w-0">
-              <h2 className="text-[15px] font-semibold">体测成绩档案</h2>
-              <p className="mt-1 truncate text-sm text-fg-muted">{fitnessSummary}</p>
-            </div>
-            <ChevronRightIcon size={18} className="shrink-0 text-fg-muted" />
-          </Link>
-        </GlassCard>
-        <GlassCard className="p-5">
-          <button type="button" className="flex w-full items-center justify-between gap-3 text-left" onClick={() => setPrefOpen(true)}>
-            <div className="min-w-0">
-              <h2 className="text-[15px] font-semibold">饮食偏好</h2>
-              <p className="mt-1 truncate text-sm text-fg-muted">{prefSummary}</p>
-            </div>
-            <ChevronRightIcon size={18} className="shrink-0 text-fg-muted" />
-          </button>
-        </GlassCard>
-        <ReminderSettings />
+      <PageHeader title="我的" subtitle="账号资料、学业偏好与系统设置" />
+      <div className="space-y-6">
+        <section className="space-y-3">
+          <h2 className="px-1 text-xs font-semibold tracking-wide text-fg-muted">个人与校区</h2>
+          <ProfileCard user={user} />
+          <CampusPicker />
+        </section>
+
+        <section className="space-y-3">
+          <h2 className="px-1 text-xs font-semibold tracking-wide text-fg-muted">学业与偏好</h2>
+          <GlassCard className="p-5">
+            <Link to="/scores" className="flex w-full items-center justify-between gap-3 text-left">
+              <div className="min-w-0">
+                <h3 className="text-[15px] font-semibold">成绩与体测</h3>
+                <p className="mt-1 truncate text-sm text-fg-muted">{scoresSummary}</p>
+              </div>
+              <ChevronRightIcon size={18} className="shrink-0 text-fg-muted" />
+            </Link>
+          </GlassCard>
+          <GlassCard className="p-5">
+            <button type="button" className="flex w-full items-center justify-between gap-3 text-left" onClick={() => setPrefOpen(true)}>
+              <div className="min-w-0">
+                <h3 className="text-[15px] font-semibold">饮食偏好</h3>
+                <p className="mt-1 truncate text-sm text-fg-muted">{prefSummary}</p>
+              </div>
+              <ChevronRightIcon size={18} className="shrink-0 text-fg-muted" />
+            </button>
+          </GlassCard>
+          <ReminderSettings />
+        </section>
+
         {user.role === 'admin' && (
-          <>
+          <section className="space-y-3">
+            <h2 className="px-1 text-xs font-semibold tracking-wide text-fg-muted">管理员工具</h2>
             <GlassCard className="p-5">
               <Link to="/admin" className="flex items-center justify-between gap-3">
                 <div>
-                  <h2 className="text-[15px] font-semibold">商家管理 · 管理员</h2>
+                  <h3 className="text-[15px] font-semibold">商家管理</h3>
                   <p className="mt-1 text-sm text-fg-muted">审核待上架商家、编辑信息或标记已关店</p>
                 </div>
                 <ChevronRightIcon size={18} className="shrink-0 text-fg-muted" />
               </Link>
             </GlassCard>
             <SemesterSettings />
-          </>
+          </section>
         )}
-        <ScenePicker />
-        <DisplaySettings />
-        {isNative && <AppUpdateCard />}
-        <AccountSecurityCard
-          email={user.email}
-          hasPassword={user.hasPassword}
-          onLoggedOut={() => navigate('/login', { replace: true })}
-        />
-        <Button
-          variant="ghost"
-          className="w-full"
-          loading={loggingOut}
-          onClick={async () => {
-            setLoggingOut(true);
-            await logout().catch(() => undefined);
-            navigate('/login', { replace: true });
-          }}
-        >
-          退出当前设备
-        </Button>
+
+        <section className="space-y-3">
+          <h2 className="px-1 text-xs font-semibold tracking-wide text-fg-muted">外观与系统</h2>
+          <ScenePicker />
+          <DisplaySettings />
+          {isNative && <AppUpdateCard />}
+          <AccountSecurityCard
+            email={user.email}
+            hasPassword={user.hasPassword}
+            onLoggedOut={() => navigate('/login', { replace: true })}
+          />
+          <Button
+            variant="ghost"
+            className="w-full"
+            loading={loggingOut}
+            onClick={async () => {
+              setLoggingOut(true);
+              await logout().catch(() => undefined);
+              navigate('/login', { replace: true });
+            }}
+          >
+            退出当前设备
+          </Button>
+        </section>
       </div>
       <PreferencesSheet open={prefOpen} onClose={() => setPrefOpen(false)} initial={pref} />
     </>

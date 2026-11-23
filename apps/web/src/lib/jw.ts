@@ -208,3 +208,78 @@ export async function jwExamsPayload(semesterCode: string): Promise<string> {
   if (/<tr\b/i.test(html)) return html;
   return '{"total":0,"rows":[]}';
 }
+
+/**
+ * 读取教务系统全部（或指定学期）课程成绩与绩点（乘方教务 xskccjxx）。
+ * 1. 优先 POST /xskccjxx!getDataList.action（自动处理 >200 条分页）；
+ * 2. 若路径有定制差异，回退读取 /xskccjxx!xskccjList.action 自动探测真实 action 或直接提取表格 HTML。
+ */
+export async function jwGradesPayload(semesterCode = ''): Promise<string> {
+  const buildForm = (page: number) => ({
+    xnxqdm: semesterCode,
+    jhlxdm: '',
+    page: String(page),
+    rows: '200',
+    sort: 'xnxqdm',
+    order: 'desc',
+  });
+
+  const primary = await jwRequest('/xskccjxx!getDataList.action', { method: 'POST', data: buildForm(1) });
+  const primaryJson = tryJsonText(primary.data);
+  if (primaryJson) {
+    try {
+      const parsed = JSON.parse(primaryJson) as { total?: number; rows?: unknown[] };
+      if (parsed && Array.isArray(parsed.rows) && typeof parsed.total === 'number' && parsed.total > parsed.rows.length) {
+        const allRows = [...parsed.rows];
+        const pages = Math.min(5, Math.ceil(parsed.total / 200));
+        for (let p = 2; p <= pages; p++) {
+          const nextRes = await jwRequest('/xskccjxx!getDataList.action', { method: 'POST', data: buildForm(p) });
+          const nextText = tryJsonText(nextRes.data);
+          if (!nextText) break;
+          const nextParsed = JSON.parse(nextText) as { rows?: unknown[] };
+          if (Array.isArray(nextParsed.rows)) allRows.push(...nextParsed.rows);
+        }
+        return JSON.stringify({ total: allRows.length, rows: allRows });
+      }
+    } catch {
+      // 保留原始 JSON 交由 shared 解析
+    }
+    return primaryJson;
+  }
+
+  const pageRes = await jwRequest('/xskccjxx!xskccjList.action');
+  const html = typeof pageRes.data === 'string' ? pageRes.data : JSON.stringify(pageRes.data);
+  const pageJson = tryJsonText(html);
+  if (pageJson) return pageJson;
+
+  const actionMatch = /['"](\/?[a-zA-Z0-9_/-]*cj[a-zA-Z0-9_-]*![a-zA-Z0-9_]+\.action)['"]/i.exec(html);
+  if (actionMatch?.[1]) {
+    const discoveredPath = actionMatch[1].startsWith('/') ? actionMatch[1] : `/${actionMatch[1]}`;
+    if (discoveredPath !== '/xskccjxx!getDataList.action') {
+      const sub = await jwRequest(discoveredPath, { method: 'POST', data: buildForm(1) });
+      const subJson = tryJsonText(sub.data);
+      if (subJson) return subJson;
+    }
+  }
+
+  if (/<tr\b/i.test(html)) return html;
+  return '{"total":0,"rows":[]}';
+}
+
+/**
+ * 探测当前已登录教务会话中是否可直接读取体测数据；若无此模块则返回 null（由 tzcs.ts 接管）。
+ */
+export async function jwFitnessProbe(): Promise<string | null> {
+  const candidates = ['/xstzcs!getDataList.action', '/tzcs!getDataList.action', '/xstzcj!getDataList.action'];
+  for (const path of candidates) {
+    try {
+      const res = await jwRequest(path, { method: 'POST', data: { page: '1', rows: '20' } });
+      if (res.status >= 400) continue;
+      const json = tryJsonText(res.data);
+      if (json && /肺活量|50米|体前屈|fhl|sg|tz|height/i.test(json)) return json;
+    } catch (err) {
+      if (err instanceof JwLoginRequired) return null;
+    }
+  }
+  return null;
+}

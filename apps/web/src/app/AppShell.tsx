@@ -21,6 +21,7 @@ export function AppShell() {
   useEffect(() => {
     const preload = () => {
       void import('../features/timetable/TimetablePage');
+      void import('../features/scores/ScoresPage');
       void import('../features/food/FoodPage');
       void import('../features/todo/TodoPage');
     };

@@ -187,6 +187,18 @@ export interface UserDataExport {
     note: string | null;
     source: string;
   }[];
+  grades?: {
+    semesterCode: string;
+    semesterName: string;
+    courseCode: string | null;
+    courseName: string;
+    credits: number;
+    scoreText: string;
+    gradePoint: number;
+    courseType: string | null;
+    examType: string | null;
+    source: string;
+  }[];
   todos: {
     title: string;
     note: string | null;

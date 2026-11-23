@@ -27,10 +27,11 @@ export const router = createBrowserRouter([
             children: [
               { index: true, Component: TodayPage },
               { path: 'timetable', lazy: () => import('../features/timetable/TimetablePage').then((m) => ({ Component: m.TimetablePage })) },
+              { path: 'scores', lazy: () => import('../features/scores/ScoresPage').then((m) => ({ Component: m.ScoresPage })) },
               { path: 'food', lazy: () => import('../features/food/FoodPage').then((m) => ({ Component: m.FoodPage })) },
               { path: 'todo', lazy: () => import('../features/todo/TodoPage').then((m) => ({ Component: m.TodoPage })) },
               { path: 'ranking', lazy: () => import('../features/ranking/RankingPage').then((m) => ({ Component: m.RankingPage })) },
-              { path: 'fitness', lazy: () => import('../features/fitness/FitnessPage').then((m) => ({ Component: m.FitnessPage })) },
+              { path: 'fitness', element: <Navigate to="/scores?tab=fitness" replace /> },
               { path: 'me', lazy: () => import('../features/me/MePage').then((m) => ({ Component: m.MePage })) },
               { path: 'admin', lazy: () => import('../features/admin/AdminPage').then((m) => ({ Component: m.AdminPage })) },
             ],

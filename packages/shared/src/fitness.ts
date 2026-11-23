@@ -97,6 +97,15 @@ export interface FitnessData {
   records: FitnessRecord[];
 }
 
+export interface CurrentFitnessData {
+  /** 当前学年（如 '2026-2027'） */
+  academicYear: string;
+  /** 当前学年的体测成绩（尚未查询/录入时为 null） */
+  record: FitnessRecord | null;
+  /** 最近一次同步或更新时间（ISO 字符串） */
+  syncedAt: string | null;
+}
+
 export type FitnessMeasurements = Pick<
   FitnessRecord,
   | 'gradeYear'

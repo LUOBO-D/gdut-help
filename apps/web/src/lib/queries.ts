@@ -1,8 +1,11 @@
 import {
   DEFAULT_CAMPUS_ID,
+  defaultAcademicYear,
+  type CurrentFitnessData,
   type DiningContext,
   type ExamData,
   type FitnessData,
+  type GradeData,
   type MealFeedback,
   type MealRecommendationResponse,
   type MealType,
@@ -28,6 +31,8 @@ export const keys = {
   timetable: ['timetable'] as const,
   exams: ['exams'] as const,
   fitness: ['fitness'] as const,
+  fitnessCurrent: (academicYear?: string) => ['fitness', 'current', academicYear ?? defaultAcademicYear()] as const,
+  grades: ['grades'] as const,
   todos: ['todos'] as const,
   notifications: ['notifications'] as const,
   preferences: ['preferences'] as const,
@@ -83,6 +88,25 @@ export function useFitnessRecords() {
     queryFn: () => api<FitnessData>('/fitness'),
     enabled: useLoggedIn(),
     staleTime: 5 * 60_000,
+  });
+}
+
+export function useCurrentFitness(academicYear?: string) {
+  const year = academicYear ?? defaultAcademicYear();
+  return useQuery({
+    queryKey: keys.fitnessCurrent(year),
+    queryFn: () => api<CurrentFitnessData>(`/fitness/current?academicYear=${encodeURIComponent(year)}`),
+    enabled: useLoggedIn(),
+    staleTime: 2 * 60_000,
+  });
+}
+
+export function useGrades() {
+  return useQuery({
+    queryKey: keys.grades,
+    queryFn: () => api<GradeData>('/grades'),
+    enabled: useLoggedIn(),
+    staleTime: 2 * 60_000,
   });
 }
 

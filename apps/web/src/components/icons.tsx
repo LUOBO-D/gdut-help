@@ -178,3 +178,9 @@ export const DownloadCloudIcon = (p: IconProps) => (
     <path d="M20 16.2A4.5 4.5 0 0 0 18 8h-1.26A7 7 0 1 0 5 14.9" />
   </Icon>
 );
+export const ScoreIcon = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M4 19h16" />
+    <path d="M7 16v-5M12 16V7M17 16v-8" />
+  </Icon>
+);

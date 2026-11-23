@@ -6,6 +6,7 @@ import { AuthModule } from './auth/auth.module.js';
 import { AppConfigModule } from './config/config.module.js';
 import { ExamModule } from './exam/exam.module.js';
 import { FitnessModule } from './fitness/fitness.module.js';
+import { GradeModule } from './grade/grade.module.js';
 import { HealthController } from './health/health.controller.js';
 import { MailModule } from './mail/mail.module.js';
 import { MerchantModule } from './merchant/merchant.module.js';
@@ -32,6 +33,7 @@ import { WeatherModule } from './weather/weather.module.js';
     TimetableModule,
     ExamModule,
     FitnessModule,
+    GradeModule,
     NotifyModule,
     TodoModule,
     MerchantModule,
