@@ -2,9 +2,11 @@ import {
   DEFAULT_CAMPUS_ID,
   defaultAcademicYear,
   defaultSemesterCode,
+  type CetRecord,
   type CourseListQuery,
   type CourseReviewDetailResponse,
   type CourseReviewListResponse,
+  type CourseSelectionReminder,
   type CreditPlan,
   type CurrentFitnessData,
   type DiningContext,
@@ -39,6 +41,8 @@ export const keys = {
   fitness: ['fitness'] as const,
   fitnessCurrent: (academicYear?: string) => ['fitness', 'current', academicYear ?? defaultAcademicYear()] as const,
   grades: ['grades'] as const,
+  cetRecords: ['cet-records'] as const,
+  courseSelections: ['course-selections'] as const,
   creditPlan: ['grades', 'credit-plan'] as const,
   secondClassPrefix: ['second-class'] as const,
   secondClassSummary: (academicYear?: string, semesterCode?: string) =>
@@ -142,6 +146,24 @@ export function useCreditPlan() {
     queryFn: () => api<CreditPlan>('/grades/credit-plan'),
     enabled: useLoggedIn(),
     staleTime: 5 * 60_000,
+  });
+}
+
+export function useCetRecords() {
+  return useQuery({
+    queryKey: keys.cetRecords,
+    queryFn: () => api<CetRecord[]>('/cet'),
+    enabled: useLoggedIn(),
+    staleTime: 2 * 60_000,
+  });
+}
+
+export function useCourseSelections() {
+  return useQuery({
+    queryKey: keys.courseSelections,
+    queryFn: () => api<CourseSelectionReminder[]>('/course-selections'),
+    enabled: useLoggedIn(),
+    staleTime: 60_000,
   });
 }
 

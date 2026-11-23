@@ -68,6 +68,8 @@ model User {
   submittedSharedCourses SharedCourse[]
   courseReviews         CourseReview[]
   courseReviewLikes     CourseReviewLike[]
+  cetRecords            CetRecord[]
+  selectionReminders    CourseSelectionReminder[]
 
   @@map("users")
 }
@@ -794,4 +796,54 @@ model CourseReviewLike {
 
   @@id([reviewId, userId])
   @@map("course_review_likes")
+}
+
+enum CetLevel {
+  cet4
+  cet6
+}
+
+/// 全国大学英语四六级成绩记录（每位用户按 level + 考次唯一）
+model CetRecord {
+  id          String   @id @default(uuid()) @db.Uuid
+  userId      String   @map("user_id") @db.Uuid
+  level       CetLevel
+  examSession String   @map("exam_session")
+  totalScore  Int      @map("total_score") @db.SmallInt
+  listening   Int?     @db.SmallInt
+  reading     Int?     @db.SmallInt
+  writing     Int?     @db.SmallInt
+  oralGrade   String?  @map("oral_grade")
+  ticketNo    String?  @map("ticket_no")
+  source      String   @default("manual")
+  note        String?
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt   DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, level, examSession])
+  @@index([userId, level])
+  @@map("cet_records")
+}
+
+/// 选课时间提醒（正选/公选抢课/体育选课/补退选，支持提前多档本地通知与首页倒计时）
+model CourseSelectionReminder {
+  id          String    @id @default(uuid()) @db.Uuid
+  userId      String    @map("user_id") @db.Uuid
+  title       String
+  kind        String    @default("elective")
+  startAt     DateTime  @map("start_at") @db.Timestamptz
+  endAt       DateTime? @map("end_at") @db.Timestamptz
+  enabled     Boolean   @default(true)
+  leadMinutes Int[]     @default([1440, 30, 5]) @map("lead_minutes") @db.SmallInt
+  note        String?
+  source      String    @default("manual")
+  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt   DateTime  @updatedAt @map("updated_at") @db.Timestamptz
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, startAt])
+  @@map("course_selection_reminders")
 }

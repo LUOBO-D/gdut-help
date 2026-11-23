@@ -1,6 +1,13 @@
-import type { ExamData, TimetableData, Todo } from '@gduthelp/shared';
+import type { CourseSelectionReminder, ExamData, TimetableData, Todo } from '@gduthelp/shared';
 import { describe, expect, it } from 'vitest';
-import { notificationId, planClassReminders, planExamReminders, planReminders, TEST_NOTIFICATION_ID } from './reminder-plan';
+import {
+  notificationId,
+  planClassReminders,
+  planExamReminders,
+  planReminders,
+  planSelectionReminders,
+  TEST_NOTIFICATION_ID,
+} from './reminder-plan';
 
 const now = new Date('2026-11-20T02:00:00Z'); // 北京时间 10:00
 const iso = (minutesFromNow: number) => new Date(now.getTime() + minutesFromNow * 60_000).toISOString();
@@ -132,5 +139,43 @@ describe('planExamReminders', () => {
     expect(plans[0]!.link).toBe('/timetable?view=exam');
     expect(plans[1]!.title).toBe('1 小时后开考：高等数学A(1)');
     expect(plans[1]!.at.toISOString()).toBe(new Date('2027-01-08T07:30:00+08:00').toISOString());
+  });
+});
+
+describe('planSelectionReminders', () => {
+  it('plans multi-lead local notifications for enabled upcoming course selection rounds', () => {
+    const base = new Date('2026-12-20T10:00:00+08:00');
+    const items: CourseSelectionReminder[] = [
+      {
+        id: 'sel-1',
+        title: '公共选修课正选',
+        kind: 'elective',
+        startAt: '2026-12-21T12:30:00+08:00',
+        endAt: '2026-12-23T17:00:00+08:00',
+        enabled: true,
+        leadMinutes: [1440, 30, 5],
+        note: '备好公选课号',
+        source: 'manual',
+        createdAt: '2026-12-10T00:00:00Z',
+      },
+      {
+        id: 'sel-off',
+        title: '已关闭提醒',
+        kind: 'pe',
+        startAt: '2026-12-21T12:30:00+08:00',
+        endAt: null,
+        enabled: false,
+        leadMinutes: [30],
+        note: null,
+        source: 'manual',
+        createdAt: '2026-12-10T00:00:00Z',
+      },
+    ];
+    const plans = planSelectionReminders(items, base);
+    expect(plans).toHaveLength(3);
+    expect(plans[0]!.title).toBe('选课提醒（1 天后开始）：公共选修课正选');
+    expect(plans[1]!.title).toBe('选课提醒（30 分钟后开始）：公共选修课正选');
+    expect(plans[2]!.title).toBe('选课提醒（5 分钟后开始）：公共选修课正选');
+    expect(plans[2]!.link).toBe('/study?tab=reviews');
   });
 });

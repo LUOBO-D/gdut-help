@@ -1,4 +1,4 @@
-import type { Scene } from '../lib/scene';
+import type { Scene, TimePhase } from '../lib/scene';
 
 export interface CloudLook {
   /** 显示的云团数量（受画质上限约束） */
@@ -45,3 +45,57 @@ export const SKY_CONFIG: Record<Scene, SkyConfig> = {
     clouds: { count: 3, color: '#30455f', opacity: 0.55, scale: 1, speed: 0.08 },
   },
 };
+
+/** 结合时间段动态微调 3D 天空元素（清晨暖云、黄昏夕阳云、夜晚星月与暗云） */
+export function resolveSkyConfig(scene: Scene, timePhase: TimePhase): SkyConfig {
+  const base = SKY_CONFIG[scene];
+  if (scene === 'night') return base;
+
+  if (timePhase === 'night') {
+    const darkCloud = base.clouds
+      ? {
+          ...base.clouds,
+          color: scene === 'thunder' ? '#242538' : scene === 'rain' ? '#2c3d61' : '#324869',
+          opacity: Math.min(base.clouds.opacity, 0.72),
+        }
+      : null;
+    const clearEnoughForSky = scene === 'sunny' || scene === 'cloudy' || scene === 'snow';
+    return {
+      ...base,
+      sun: 0,
+      stars: clearEnoughForSky,
+      moon: scene === 'sunny' || scene === 'cloudy',
+      clouds: darkCloud,
+    };
+  }
+
+  if (timePhase === 'dusk') {
+    const duskCloud = base.clouds
+      ? {
+          ...base.clouds,
+          color: scene === 'rain' || scene === 'thunder' ? '#45476b' : '#f2b8a2',
+        }
+      : null;
+    return {
+      ...base,
+      sun: base.sun > 0 ? Math.min(base.sun, 0.72) : 0,
+      clouds: duskCloud,
+    };
+  }
+
+  if (timePhase === 'dawn') {
+    const dawnCloud = base.clouds
+      ? {
+          ...base.clouds,
+          color: scene === 'rain' || scene === 'thunder' ? base.clouds.color : '#ffe5de',
+        }
+      : null;
+    return {
+      ...base,
+      sun: base.sun > 0 ? Math.min(base.sun, 0.85) : 0,
+      clouds: dawnCloud,
+    };
+  }
+
+  return base;
+}

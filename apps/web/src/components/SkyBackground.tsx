@@ -1,7 +1,6 @@
 import { motion } from 'motion/react';
 import { lazy, Suspense, useEffect, useState, type CSSProperties } from 'react';
-import { useLocation } from 'react-router';
-import { SCENE_STYLES, type Scene } from '../lib/scene';
+import { resolveScenePalette, type Scene, type TimePhase } from '../lib/scene';
 import { SCENE_FADE } from '../motion/presets';
 import { useEffectiveQuality, useQualityStore } from '../three/quality-store';
 import { ErrorBoundary } from './ErrorBoundary';
@@ -9,51 +8,114 @@ import { ErrorBoundary } from './ErrorBoundary';
 // three.js 体积较大，单独分包，首屏渲染完成后再加载
 const Sky3D = lazy(() => import('../three/Sky3D'));
 
-/** 3D 天空持续动画的页面；其他页面只保留最后一帧 */
-const ANIMATED_PATHS = new Set(['/', '/login']);
+const CSS_RAIN_DROPS = Array.from({ length: 28 }, (_, i) => ({
+  left: `${(i * 37) % 100}%`,
+  delay: `${-((i * 0.23) % 1.4).toFixed(2)}s`,
+  duration: `${(0.75 + (i % 5) * 0.14).toFixed(2)}s`,
+  opacity: 0.28 + (i % 4) * 0.12,
+}));
+
+const CSS_SNOW_FLAKES = Array.from({ length: 22 }, (_, i) => ({
+  left: `${(i * 43) % 100}%`,
+  delay: `${-((i * 0.55) % 4.5).toFixed(2)}s`,
+  duration: `${(4.2 + (i % 5) * 0.9).toFixed(2)}s`,
+  size: 4 + (i % 4) * 2,
+}));
+
+interface LayerSpec {
+  scene: Scene;
+  timePhase: TimePhase;
+}
 
 /**
- * 天空背景，自下而上三层：
- * 1. CSS 渐变（场景切换时交叉淡化）+ 光斑：所有画质都有，3D 加载前也立即可见
- * 2. 3D 天空：高、中画质
- * 3. 细噪点：减少大面积渐变的色带
+ * 全站统一天空背景与天气动效（挂载在 RootLayout，切换任何页面均无缝同步持续播放）：
+ * 1. 动态 CSS 渐变（随「天气 × 时间段」平滑交叉淡化）+ 光斑；
+ * 2. 3D 天空动效（中/高画质全页面持续动画，仅切后台时自动暂停省电）；
+ * 3. 低画质 / WebGL 回退轻量 CSS 雨雪粒子层，确保每台手机每个页面雨雪动效都同步可见。
  */
-export function SkyBackground({ scene }: { scene: Scene }) {
+export function SkyBackground({ scene, timePhase }: { scene: Scene; timePhase: TimePhase }) {
   const quality = useEffectiveQuality();
   const preference = useQualityStore((s) => s.preference);
   const gyro = useQualityStore((s) => s.gyro);
   const downgrade = useQualityStore((s) => s.downgrade);
   const markWebglFailed = useQualityStore((s) => s.markWebglFailed);
-  const { pathname } = useLocation();
   const idle = useAfterFirstPaint();
+  const pageVisible = usePageVisible();
   const show3D = idle && (quality === 'high' || quality === 'medium');
 
-  const [layers, setLayers] = useState<{ current: Scene; under: Scene | null }>({ current: scene, under: null });
-  if (layers.current !== scene) setLayers({ current: scene, under: layers.current });
+  const [layers, setLayers] = useState<{ current: LayerSpec; under: LayerSpec | null }>({
+    current: { scene, timePhase },
+    under: null,
+  });
+  if (layers.current.scene !== scene || layers.current.timePhase !== timePhase) {
+    setLayers({ current: { scene, timePhase }, under: layers.current });
+  }
+
+  const currentKey = `${layers.current.scene}-${layers.current.timePhase}`;
 
   return (
     <div className="pointer-events-none fixed inset-0 -z-10 overflow-hidden" aria-hidden="true">
-      {/* 旧场景完全不透明地垫在下面，新场景在上面淡入，结束后再移除旧场景。
-          如果让两层同时半透明交叉淡化，中途会透出 body 底色，看起来就是一次闪屏 */}
-      {layers.under && <SkyLayer scene={layers.under} animateGlows={false} />}
+      {layers.under && (
+        <SkyLayer scene={layers.under.scene} timePhase={layers.under.timePhase} animateGlows={false} />
+      )}
       <motion.div
-        key={layers.current}
+        key={currentKey}
         className="absolute inset-0"
         initial={{ opacity: layers.under ? 0 : 1 }}
         animate={{ opacity: 1 }}
         transition={SCENE_FADE}
         onAnimationComplete={() => setLayers((l) => ({ ...l, under: null }))}
       >
-        <SkyLayer scene={layers.current} animateGlows={!show3D} />
+        <SkyLayer scene={layers.current.scene} timePhase={layers.current.timePhase} animateGlows={!show3D} />
       </motion.div>
+
+      {/* 非 3D 档位 / 3D 加载前依然呈现同步的轻量 CSS 雨雪动效 */}
+      {!show3D && (scene === 'rain' || scene === 'thunder') && (
+        <div className="absolute inset-0 overflow-hidden">
+          {CSS_RAIN_DROPS.map((d, idx) => (
+            <span
+              key={idx}
+              className="css-raindrop"
+              style={
+                {
+                  left: d.left,
+                  animationDelay: d.delay,
+                  animationDuration: d.duration,
+                  opacity: d.opacity,
+                } as CSSProperties
+              }
+            />
+          ))}
+        </div>
+      )}
+      {!show3D && scene === 'snow' && (
+        <div className="absolute inset-0 overflow-hidden">
+          {CSS_SNOW_FLAKES.map((f, idx) => (
+            <span
+              key={idx}
+              className="css-snowflake"
+              style={
+                {
+                  left: f.left,
+                  width: `${f.size}px`,
+                  height: `${f.size}px`,
+                  animationDelay: f.delay,
+                  animationDuration: f.duration,
+                } as CSSProperties
+              }
+            />
+          ))}
+        </div>
+      )}
 
       {show3D && (
         <ErrorBoundary onError={markWebglFailed}>
           <Suspense fallback={null}>
             <Sky3D
               scene={scene}
+              timePhase={timePhase}
               quality={quality}
-              animate={ANIMATED_PATHS.has(pathname)}
+              animate={pageVisible}
               gyro={gyro}
               onSlow={preference === 'auto' ? downgrade : undefined}
             />
@@ -64,9 +126,16 @@ export function SkyBackground({ scene }: { scene: Scene }) {
   );
 }
 
-/** 一个场景的渐变和光斑。有 3D 时光斑静止，动态交给 3D 场景，减少同时进行的合成动画 */
-function SkyLayer({ scene, animateGlows }: { scene: Scene; animateGlows: boolean }) {
-  const style = SCENE_STYLES[scene];
+function SkyLayer({
+  scene,
+  timePhase,
+  animateGlows,
+}: {
+  scene: Scene;
+  timePhase: TimePhase;
+  animateGlows: boolean;
+}) {
+  const style = resolveScenePalette(scene, timePhase);
   return (
     <div className="absolute inset-0" style={{ background: style.sky }}>
       <Glow color={style.glows[0]} animate={animateGlows} className="-left-[20vmax] -top-[18vmax] size-[60vmax]" dx="8vw" dy="6vh" duration={22} />
@@ -76,7 +145,18 @@ function SkyLayer({ scene, animateGlows }: { scene: Scene; animateGlows: boolean
   );
 }
 
-/** 首屏绘制完成、浏览器空闲后才返回 true，保证 3D 不拖慢首屏 */
+function usePageVisible(): boolean {
+  const [visible, setVisible] = useState(() =>
+    typeof document === 'undefined' ? true : document.visibilityState === 'visible',
+  );
+  useEffect(() => {
+    const onChange = () => setVisible(document.visibilityState === 'visible');
+    document.addEventListener('visibilitychange', onChange);
+    return () => document.removeEventListener('visibilitychange', onChange);
+  }, []);
+  return visible;
+}
+
 function useAfterFirstPaint(): boolean {
   const [ready, setReady] = useState(false);
   useEffect(() => {
@@ -84,7 +164,6 @@ function useAfterFirstPaint(): boolean {
       const id = window.requestIdleCallback(() => setReady(true), { timeout: 1500 });
       return () => window.cancelIdleCallback(id);
     }
-    // Safari 没有 requestIdleCallback
     const id = window.setTimeout(() => setReady(true), 300);
     return () => window.clearTimeout(id);
   }, []);
@@ -108,7 +187,6 @@ function Glow({
 }) {
   return (
     <div
-      // 径向渐变本身就是柔边，不再叠加 CSS blur：对 60vmax 的大元素做模糊，切换场景时重绘开销很大
       className={`absolute rounded-full opacity-60 ${animate ? 'will-change-transform' : ''} ${className}`}
       style={
         {

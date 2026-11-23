@@ -25,8 +25,8 @@ export const SKY3D_SETTINGS: Record<Exclude<Quality, 'low'>, Sky3DSettings> = {
   medium: { dpr: 1, rain: 500, snow: 350, stars: 450, clouds: 5 },
 };
 
-/** 连续 3 秒平均帧率低于这个值时自动降一档 */
-export const MIN_FPS = 40;
+/** 连续 3 秒平均帧率低于这个值时自动降一档（避开切页瞬间掉帧误触发） */
+export const MIN_FPS = 26;
 
 /**
  * detect-gpu 默认从 unpkg 下载跑分数据，国内访问不稳定。

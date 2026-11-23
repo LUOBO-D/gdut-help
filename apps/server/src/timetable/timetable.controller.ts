@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, HttpCode, Param, Post, Put } from '@nestjs/common';
+import { Body, Controller, Delete, Get, HttpCode, Param, Post, Put, Query } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
 import {
   courseInputSchema,
@@ -6,6 +6,7 @@ import {
   timetableImportSchema,
   timetableShareCodeSchema,
   type Course,
+  type EmptyRoomsInferenceResponse,
   type Semester,
   type SemesterInput,
   type TimetableData,
@@ -19,6 +20,12 @@ import { TimetableService } from './timetable.service.js';
 
 type CourseData = z.output<typeof courseInputSchema>;
 const idParam = z.uuid();
+const emptyRoomsQuerySchema = z.object({
+  week: z.coerce.number().int().min(1).max(30),
+  weekday: z.coerce.number().int().min(1).max(7),
+  periodStart: z.coerce.number().int().min(1).max(12),
+  periodEnd: z.coerce.number().int().min(1).max(12),
+});
 
 @Controller()
 export class TimetableController {
@@ -28,6 +35,14 @@ export class TimetableController {
   @Get('timetable')
   data(@CurrentUser() user: AuthUser): Promise<TimetableData> {
     return this.timetable.data(user.id);
+  }
+
+  /** 基于全校已同步课表脱敏推算指定时段的空闲教室（零个人信息） */
+  @Get('timetable/empty-rooms')
+  emptyRooms(
+    @Query({ schema: emptyRoomsQuerySchema }) q: z.output<typeof emptyRoomsQuerySchema>,
+  ): Promise<EmptyRoomsInferenceResponse> {
+    return this.timetable.findEmptyRooms(q);
   }
 
   /** 生成 6 位课表分享码（7 天有效），方便同班/室友 10 秒复制课表 */

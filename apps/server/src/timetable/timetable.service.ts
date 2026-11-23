@@ -10,8 +10,12 @@ import {
   ErrorCode,
   formatDate,
   importKeyOf,
+  inferBuildingGroup,
+  matchCampusBuilding,
   timetableImportSchema,
   type Course,
+  type EmptyClassroom,
+  type EmptyRoomsInferenceResponse,
   type ImportedCourse,
   type Semester,
   type SemesterInput,
@@ -304,8 +308,101 @@ export class TimetableService {
     };
   }
 
+  /**
+   * 基于全校当前学期已同步的脱敏课程地点，推算指定周次/星期/节次的空闲教室。
+   * 仅聚合教室名称与占用时段，不暴露任何用户或课程隐私。
+   */
+  async findEmptyRooms(opts: {
+    week: number;
+    weekday: number;
+    periodStart: number;
+    periodEnd: number;
+  }): Promise<EmptyRoomsInferenceResponse> {
+    const semester = await this.currentSemester();
+    if (!semester) {
+      return { source: 'timetable', rooms: [], occupiedCount: 0, totalKnownRooms: 0 };
+    }
+
+    const start = Math.min(opts.periodStart, opts.periodEnd);
+    const end = Math.max(opts.periodStart, opts.periodEnd);
+
+    const slots = await this.prisma.courseSlot.findMany({
+      where: { course: { semesterId: semester.id } },
+      select: {
+        weekday: true,
+        periodStart: true,
+        periodEnd: true,
+        weeks: true,
+        location: true,
+        course: { select: { location: true } },
+      },
+    });
+
+    const knownRooms = new Set<string>();
+    const occupiedRooms = new Set<string>();
+
+    for (const slot of slots) {
+      const names = extractClassroomNames(slot.location ?? slot.course.location);
+      if (names.length === 0) continue;
+      const busy =
+        slot.weekday === opts.weekday &&
+        slot.periodStart <= end &&
+        slot.periodEnd >= start &&
+        slot.weeks.includes(opts.week);
+
+      for (const name of names) {
+        knownRooms.add(name);
+        if (busy) occupiedRooms.add(name);
+      }
+    }
+
+    const rooms: EmptyClassroom[] = [];
+    for (const name of knownRooms) {
+      if (occupiedRooms.has(name)) continue;
+      const building = inferBuildingGroup(name);
+      const matched = matchCampusBuilding(name) ?? matchCampusBuilding(building);
+      rooms.push({
+        name,
+        building,
+        seats: null,
+        roomType: '校内课表推算',
+        campus: null,
+        mapBuildingId: matched?.id ?? null,
+      });
+    }
+
+    rooms.sort((a, b) => a.building.localeCompare(b.building, 'zh-CN') || a.name.localeCompare(b.name, 'zh-CN'));
+
+    return {
+      source: 'timetable',
+      rooms,
+      occupiedCount: occupiedRooms.size,
+      totalKnownRooms: knownRooms.size,
+    };
+  }
+
   private async owned(userId: string, id: string) {
     const c = await this.prisma.course.findFirst({ where: { id, userId }, select: { id: true } });
     if (!c) throw new AppException(ErrorCode.NOT_FOUND, '课程不存在', 404);
   }
+}
+
+const EXCLUDED_ROOM_RE = /线上|网课|腾讯会议|待定|田径|体育场|体育馆|操场|足球|篮球|排球|网球|羽毛球|游泳|乒乓|健身|校外|实习/;
+const CLASSROOM_LIKE_RE =
+  /(?:教[1-6一二三四五六]|大教室|工学|实验|教学楼|综合楼|阶梯|课室|多媒体|图书馆|行政楼|经管楼|艺术楼|机电|电信|计算机|材料|轻工|土木|外语|[A-Za-z]-?\d{3})/;
+
+function extractClassroomNames(raw: string | null | undefined): string[] {
+  if (!raw) return [];
+  const parts = raw
+    .split(/[,，;；/、]+/)
+    .map((s) => s.replace(/\s+/g, ' ').trim())
+    .filter(Boolean);
+  const out: string[] = [];
+  for (const part of parts) {
+    if (part.length < 2 || part.length > 32) continue;
+    if (EXCLUDED_ROOM_RE.test(part)) continue;
+    if (!CLASSROOM_LIKE_RE.test(part)) continue;
+    out.push(part);
+  }
+  return out;
 }

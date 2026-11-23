@@ -7,6 +7,7 @@ import {
   sessionsOn,
   shanghaiTime,
   today,
+  type CourseSelectionReminder,
   type ExamData,
   type TimetableData,
   type Todo,
@@ -141,11 +142,53 @@ export function planExamReminders(examData: ExamData | undefined, now: Date): Pl
   return planned.sort((a, b) => a.at.getTime() - b.at.getTime()).slice(0, MAX_SCHEDULED);
 }
 
-/** 合并待办 + 课前 + 考前通知并控制在安卓安全上限内 */
+/** 从选课时间提醒算出未来 7 天的抢课本地通知（支持提前 1 天 / 1 小时 / 30 分钟 / 10 分钟 / 5 分钟） */
+export function planSelectionReminders(
+  items: readonly CourseSelectionReminder[] | undefined,
+  now: Date,
+): PlannedReminder[] {
+  if (!items?.length) return [];
+  const nowMs = now.getTime();
+  const untilMs = nowMs + HORIZON_MS;
+  const planned: PlannedReminder[] = [];
+
+  for (const item of items) {
+    if (!item.enabled) continue;
+    const start = new Date(item.startAt);
+    const startMs = start.getTime();
+    if (Number.isNaN(startMs) || startMs <= nowMs) continue;
+
+    for (const mins of item.leadMinutes) {
+      const fireMs = startMs - mins * 60_000;
+      if (fireMs <= nowMs || fireMs > untilMs) continue;
+      const leadLabel =
+        mins >= 1440
+          ? `${Math.round(mins / 1440)} 天后`
+          : mins >= 60
+            ? `${Math.round(mins / 60)} 小时后`
+            : `${mins} 分钟后`;
+      planned.push({
+        id: notificationId(`selection:${item.id}:${mins}`),
+        todoId: `selection:${item.id}`,
+        title: `选课提醒（${leadLabel}开始）：${item.title}`,
+        body: item.note
+          ? `${formatHm(start)} 准点开放 · ${item.note}`
+          : `${formatHm(start)} 准点开放，记得提前登录广工教务`,
+        at: new Date(fireMs),
+        link: '/study?tab=reviews',
+      });
+    }
+  }
+
+  return planned.sort((a, b) => a.at.getTime() - b.at.getTime()).slice(0, MAX_SCHEDULED);
+}
+
+/** 合并待办 + 课前 + 考前 + 选课通知并控制在安卓安全上限内 */
 export function planAllReminders(opts: {
   todos: Todo[];
   timetable?: TimetableData;
   exams?: ExamData;
+  courseSelections?: CourseSelectionReminder[];
   campusId?: string | null;
   classRemindMinutes: number;
   now: Date;
@@ -154,6 +197,7 @@ export function planAllReminders(opts: {
     ...planReminders(opts.todos, opts.now),
     ...planClassReminders(opts.timetable, opts.campusId, opts.classRemindMinutes, opts.now),
     ...planExamReminders(opts.exams, opts.now),
+    ...planSelectionReminders(opts.courseSelections, opts.now),
   ];
   return merged.sort((a, b) => a.at.getTime() - b.at.getTime()).slice(0, MAX_SCHEDULED);
 }

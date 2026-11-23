@@ -5,6 +5,7 @@
  * 保证在「我的 → 广工统一认证」登录一次即可在课表、考试、成绩、学分、空教室与公选课目录全局复用。
  */
 import type { HttpResponse } from '@capacitor/core';
+import { DefaultWebViewOptions, InAppBrowser } from '@capacitor/inappbrowser';
 import {
   connectGdutAuth,
   GdutAuthRequired,
@@ -12,6 +13,7 @@ import {
   JW_ORIGIN,
   type ConnectGdutOptions,
 } from './gdut-auth';
+import { isNative } from './platform';
 
 export { JW_ORIGIN };
 
@@ -202,57 +204,150 @@ export interface JwEmptyClassroomQuery {
   campusCode?: string;
 }
 
-/** 实时查询广工乘方教务系统空教室（kxjscx / jxcdxx / cdjycx） */
-export async function jwEmptyClassroomsPayload(query: JwEmptyClassroomQuery): Promise<string> {
+export interface JwEmptyClassroomResult {
+  raw: string;
+  discoveredPageUrl: string | null;
+}
+
+/**
+ * 实时查询广工乘方教务系统空教室：
+ * 1. 先从已登录教务菜单自动探测真实空教室菜单地址（不硬编码猜测路径导致 302 误报掉线）；
+ * 2. 所有候选接口均以 allowSilentRenew:false + try/catch 隔离探测，避免不存在的 action 触发假登录过期错误；
+ * 3. 返回原始 JSON/HTML 及探测到的教务页面地址（若学校停用学生端 AJAX 查询，可一键打开官方教务页或降级课表推算）。
+ */
+export async function jwEmptyClassroomsPayload(query: JwEmptyClassroomQuery): Promise<JwEmptyClassroomResult> {
   const form: Record<string, string> = {
     xnxqdm: query.semesterCode,
     zc: String(query.week),
     xq: String(query.weekday),
     jcdm: query.periodCode,
     jcdm2: query.periodCode,
+    jc: query.periodCode,
     xqdm: query.campusCode ?? '',
     page: '1',
     rows: '120',
   };
 
-  const candidates = [
+  // 1. 尝试从已登录的教务菜单页动态发现本校真实空教室 URL
+  const discoveredPages: string[] = [];
+  const discoveredActions: string[] = [];
+  const menuPaths = ['/login!welcome.action', '/new/welcome.page', '/xtgl!getMenu.action', '/login!getMenu.action'];
+  for (const mp of menuPaths) {
+    try {
+      const res = await gdutRequest(JW_ORIGIN, mp, { allowSilentRenew: false });
+      if (res.status >= 400) continue;
+      const body = typeof res.data === 'string' ? res.data : JSON.stringify(res.data);
+      for (const m of body.matchAll(
+        /['"](\/?[a-zA-Z0-9_/-]*(?:kxjs|kjs|jxcd|cdjy|cdcx|cdxx|jscx|jszy|jsjy|kszy)[a-zA-Z0-9_-]*![a-zA-Z0-9_]+\.action(?:\?[^'"]*)?)['"]/gi,
+      )) {
+        const p = m[1]!.startsWith('/') ? m[1]! : `/${m[1]!}`;
+        if (!discoveredPages.includes(p)) discoveredPages.push(p);
+      }
+      // 同步按中文菜单标题就近匹配任意空教室/教学场地入口链接
+      for (const m of body.matchAll(
+        /(?:空教室|空闲教室|教室查询|教学场地|场地查询)[\s\S]{0,180}?['"](\/?[a-zA-Z0-9_/-]+![a-zA-Z0-9_]+\.action(?:\?[^'"]*)?)['"]|['"](\/?[a-zA-Z0-9_/-]+![a-zA-Z0-9_]+\.action(?:\?[^'"]*)?)['"][\s\S]{0,180}?(?:空教室|空闲教室|教室查询|教学场地|场地查询)/gi,
+      )) {
+        const rawPath = m[1] ?? m[2];
+        if (!rawPath) continue;
+        const p = rawPath.startsWith('/') ? rawPath : `/${rawPath}`;
+        if (!discoveredPages.includes(p)) discoveredPages.push(p);
+      }
+      if (discoveredPages.length > 0) break;
+    } catch {
+      // 忽略单条菜单探测失败，绝不中断查询流程
+    }
+  }
+
+  let discoveredPageUrl: string | null = discoveredPages[0] ? `${JW_ORIGIN}${discoveredPages[0]}` : null;
+
+  // 2. 打开探测到的页面，读取其内部真实 AJAX action 或直接渲染的教室表格
+  const pageCandidates = [
+    ...discoveredPages,
+    '/jxcdzy!jxcdzyList.action',
+    '/xskxjs!xskxjsList.action',
+    '/kxjscx!kxjscxList.action',
+    '/cdjyxx!cdjyxxList.action',
+    '/jxcdxx!kxjsList.action',
+  ];
+
+  for (const pagePath of pageCandidates) {
+    try {
+      const sep = pagePath.includes('?') ? '&' : '?';
+      const pageRes = await gdutRequest(
+        JW_ORIGIN,
+        `${pagePath}${sep}xnxqdm=${encodeURIComponent(query.semesterCode)}&zc=${query.week}&xq=${query.weekday}&jcdm=${encodeURIComponent(query.periodCode)}`,
+        { allowSilentRenew: false },
+      );
+      if (pageRes.status >= 400) continue;
+      const html = typeof pageRes.data === 'string' ? pageRes.data : JSON.stringify(pageRes.data);
+      const pageJson = tryJsonText(html);
+      if (pageJson && /jxcdmc|cdmc|jsmc|教室|教[1-6]|大教室/i.test(pageJson)) {
+        return { raw: pageJson, discoveredPageUrl: `${JW_ORIGIN}${pagePath}` };
+      }
+
+      if (/空教室|空闲教室|教学场地|教室查询/.test(html)) {
+        discoveredPageUrl = `${JW_ORIGIN}${pagePath}`;
+      }
+
+      for (const m of html.matchAll(/['"](\/?[a-zA-Z0-9_/-]*(?:kxjs|jxcd|cdjy|jsjy|kszy)[a-zA-Z0-9_-]*![a-zA-Z0-9_]+\.action)['"]/gi)) {
+        const act = m[1]!.startsWith('/') ? m[1]! : `/${m[1]!}`;
+        if (!discoveredActions.includes(act)) discoveredActions.push(act);
+      }
+
+      if (/<tr\b/i.test(html) && /(?:教[1-6]|大教室|工学)/.test(html)) {
+        return { raw: html, discoveredPageUrl: `${JW_ORIGIN}${pagePath}` };
+      }
+    } catch {
+      // 安全跳过不可用页面
+    }
+  }
+
+  // 3. 安全探测已知与动态发现的 AJAX 数据接口
+  const actionCandidates = [
+    ...discoveredActions,
+    '/jxcdzy!getDataList.action',
+    '/xskxjs!getDataList.action',
+    '/cdjyxx!getDataList.action',
     '/kxjscx!getDataList.action',
     '/jxcdxx!getKxjsList.action',
     '/cdjycx!getKxjsList.action',
     '/xsjxcdcx!getDataList.action',
+    '/jxcd!getKxjsList.action',
   ];
 
-  for (const path of candidates) {
-    const res = await jwRequest(path, { method: 'POST', data: form });
-    if (res.status >= 400) continue;
-    const json = tryJsonText(res.data);
-    if (json) return json;
-  }
-
-  const pagePaths = ['/kxjscx!kxjscxList.action', '/jxcdxx!kxjsList.action', '/cdjycx!kxjsList.action'];
-  for (const pagePath of pagePaths) {
-    const pageRes = await jwRequest(
-      `${pagePath}?xnxqdm=${encodeURIComponent(query.semesterCode)}&zc=${query.week}&xq=${query.weekday}&jcdm=${encodeURIComponent(query.periodCode)}`,
-    );
-    if (pageRes.status >= 400) continue;
-    const html = typeof pageRes.data === 'string' ? pageRes.data : JSON.stringify(pageRes.data);
-    const pageJson = tryJsonText(html);
-    if (pageJson) return pageJson;
-
-    const actionMatch = /['"](\/?[a-zA-Z0-9_/-]*(?:kxjs|jxcd|cdjy|jsjy)[a-zA-Z0-9_-]*![a-zA-Z0-9_]+\.action)['"]/i.exec(html);
-    if (actionMatch?.[1]) {
-      const discoveredPath = actionMatch[1].startsWith('/') ? actionMatch[1] : `/${actionMatch[1]}`;
-      if (!candidates.includes(discoveredPath)) {
-        const sub = await jwRequest(discoveredPath, { method: 'POST', data: form });
-        const subJson = tryJsonText(sub.data);
-        if (subJson) return subJson;
+  const tried = new Set<string>();
+  for (const path of actionCandidates) {
+    if (tried.has(path)) continue;
+    tried.add(path);
+    try {
+      const res = await gdutRequest(JW_ORIGIN, path, { method: 'POST', data: form, allowSilentRenew: false });
+      if (res.status >= 400) continue;
+      const json = tryJsonText(res.data);
+      if (json && /jxcdmc|cdmc|jsmc|教室|教[1-6]|大教室/i.test(json)) {
+        return { raw: json, discoveredPageUrl };
       }
+    } catch {
+      // 单条接口不存在或无权限时静默尝试下一条，不抛出假过期错误
     }
-
-    if (/<tr\b/i.test(html) && /教室|场地|座位/.test(html)) return html;
   }
 
-  return '{"total":0,"rows":[]}';
+  return { raw: '', discoveredPageUrl };
+}
+
+/** 在应用内浏览器（复用已登录 Cookie）直接打开广工教务页面查看官方空教室 */
+export async function openJwEmptyRoomPage(url?: string | null): Promise<void> {
+  const target = url && url.startsWith(JW_ORIGIN) ? url : `${JW_ORIGIN}/login!welcome.action`;
+  await InAppBrowser.openInWebView({
+    url: target,
+    options: {
+      ...DefaultWebViewOptions,
+      showURL: true,
+      showToolbar: true,
+      showNavigationButtons: true,
+      closeButtonText: '返回 App',
+      android: { ...DefaultWebViewOptions.android, isIsolated: false, hardwareBack: true },
+    },
+  });
 }
 
 /** 探测广工教务系统「培养方案完成情况 / 学分统计」 */
@@ -341,4 +436,119 @@ export async function jwElectiveCatalogPayload(semesterCode: string): Promise<{ 
   }
 
   return { raw: '{"total":0,"rows":[]}', assumeElective: false };
+}
+
+/**
+ * 探测广工教务「等级考试 / 社会考试成绩」记录（含四六级历史成绩）：
+ * 所有候选接口均以 allowSilentRenew:false + try/catch 隔离，避免不存在的路径误报登录过期。
+ */
+export async function jwCetScoresPayload(): Promise<string> {
+  const candidates = [
+    '/xskjcj!getDataList.action',
+    '/xsjdcj!getDataList.action',
+    '/djkscj!getDataList.action',
+    '/xskccjxx!getDjkscjList.action',
+    '/kjcjcx!getDataList.action',
+    '/shkscj!getDataList.action',
+  ];
+
+  // 从教务菜单动态发现可能存在的考级/等级考试路径
+  try {
+    const menuRes = await gdutRequest(JW_ORIGIN, '/login!welcome.action', { allowSilentRenew: false });
+    if (menuRes.status < 400) {
+      const body = typeof menuRes.data === 'string' ? menuRes.data : JSON.stringify(menuRes.data);
+      for (const m of body.matchAll(
+        /(?:等级考试|社会考试|四六级|考级成绩)[\s\S]{0,180}?['"](\/?[a-zA-Z0-9_/-]+![a-zA-Z0-9_]+\.action)['"]|['"](\/?[a-zA-Z0-9_/-]+![a-zA-Z0-9_]+\.action)['"][\s\S]{0,180}?(?:等级考试|社会考试|四六级|考级成绩)/gi,
+      )) {
+        const raw = m[1] ?? m[2];
+        if (!raw) continue;
+        const p = raw.startsWith('/') ? raw : `/${raw}`;
+        if (!candidates.includes(p)) candidates.unshift(p);
+      }
+    }
+  } catch {
+    // 忽略菜单探测失败
+  }
+
+  for (const path of candidates) {
+    try {
+      const res = await gdutRequest(JW_ORIGIN, path, {
+        method: 'POST',
+        data: { page: '1', rows: '50' },
+        allowSilentRenew: false,
+      });
+      if (res.status >= 400) continue;
+      const text = typeof res.data === 'string' ? res.data : JSON.stringify(res.data);
+      const json = tryJsonText(text);
+      if (json && /四级|六级|cet|英语/i.test(json)) return json;
+      if (/<tr\b/i.test(text) && /四级|六级|cet/i.test(text)) return text;
+    } catch {
+      // 安全尝试下一候选接口
+    }
+  }
+
+  return '';
+}
+
+/**
+ * 探测广工教务「选课时间窗口」公告或配置页面，返回可解析的原始文本。
+ */
+export async function jwSelectionWindowsPayload(): Promise<string> {
+  const candidates = [
+    '/xsxk!xsxkList.action',
+    '/xsxk!getXksj.action',
+    '/xskc!getXksj.action',
+    '/xsxk!getDataList.action',
+    '/login!welcome.action',
+  ];
+
+  const chunks: string[] = [];
+  for (const path of candidates) {
+    try {
+      const res = await gdutRequest(JW_ORIGIN, path, { allowSilentRenew: false });
+      if (res.status >= 400) continue;
+      const body = typeof res.data === 'string' ? res.data : JSON.stringify(res.data);
+      if (/选课|正选|补退选|抢课/.test(body) && /\d{4}[-/.]\d{1,2}[-/.]\d{1,2}/.test(body)) {
+        chunks.push(body);
+      }
+    } catch {
+      // 忽略单条探测失败
+    }
+  }
+
+  return chunks.join('\n');
+}
+
+/** 在应用内浏览器（复用已登录 Cookie）直接打开广工教务选课页 */
+export async function openJwSelectionPage(): Promise<void> {
+  await InAppBrowser.openInWebView({
+    url: `${JW_ORIGIN}/login!welcome.action`,
+    options: {
+      ...DefaultWebViewOptions,
+      showURL: true,
+      showToolbar: true,
+      showNavigationButtons: true,
+      closeButtonText: '返回 App',
+      android: { ...DefaultWebViewOptions.android, isIsolated: false, hardwareBack: true },
+    },
+  });
+}
+
+/** 在应用内浏览器打开官方查分/报名网页（如中国教育考试网四六级查分） */
+export async function openOfficialWebPage(url: string): Promise<void> {
+  if (!isNative) {
+    window.open(url, '_blank', 'noopener,noreferrer');
+    return;
+  }
+  await InAppBrowser.openInWebView({
+    url,
+    options: {
+      ...DefaultWebViewOptions,
+      showURL: true,
+      showToolbar: true,
+      showNavigationButtons: true,
+      closeButtonText: '返回 App',
+      android: { ...DefaultWebViewOptions.android, isIsolated: false, hardwareBack: true },
+    },
+  });
 }

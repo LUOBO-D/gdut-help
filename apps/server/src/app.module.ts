@@ -4,7 +4,9 @@ import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { AppUpdateModule } from './app-update/app-update.module.js';
 import { AuthModule } from './auth/auth.module.js';
 import { AppConfigModule } from './config/config.module.js';
+import { CetModule } from './cet/cet.module.js';
 import { CourseReviewModule } from './course-review/course-review.module.js';
+import { CourseSelectionModule } from './course-selection/course-selection.module.js';
 import { ExamModule } from './exam/exam.module.js';
 import { FitnessModule } from './fitness/fitness.module.js';
 import { GradeModule } from './grade/grade.module.js';
@@ -36,8 +38,10 @@ import { WeatherModule } from './weather/weather.module.js';
     ExamModule,
     FitnessModule,
     GradeModule,
+    CetModule,
     SecondClassModule,
     CourseReviewModule,
+    CourseSelectionModule,
     NotifyModule,
     TodoModule,
     MerchantModule,

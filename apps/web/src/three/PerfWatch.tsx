@@ -9,7 +9,7 @@ const WINDOW_SECONDS = 3;
  * 第一个窗口包含着色器编译和资源上传，跳过不算；切到后台造成的长帧也不算。
  */
 export function PerfWatch({ onSlow }: { onSlow: () => void }) {
-  const acc = useRef({ time: 0, frames: 0, skip: 1 });
+  const acc = useRef({ time: 0, frames: 0, skip: 2 });
   useFrame((_, dt) => {
     const a = acc.current;
     if (dt > 0.5) {

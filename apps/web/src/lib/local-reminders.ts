@@ -7,7 +7,7 @@
  *
  * 只有 App 里会加载这个模块（见 main.tsx），网页端不受影响。
  */
-import type { ExamData, TimetableData, Todo } from '@gduthelp/shared';
+import type { CourseSelectionReminder, ExamData, TimetableData, Todo } from '@gduthelp/shared';
 import { LocalNotifications, type LocalNotificationSchema } from '@capacitor/local-notifications';
 import type { QueryClient } from '@tanstack/react-query';
 import { useAuth } from './auth-store';
@@ -21,19 +21,21 @@ interface SyncPayload {
   todos: Todo[];
   timetable?: TimetableData;
   exams?: ExamData;
+  courseSelections?: CourseSelectionReminder[];
   campusId?: string | null;
   classRemindMinutes: number;
 }
 
 let queue: Promise<void> = Promise.resolve();
 
-/** 按最新的待办、课表与考试重排本地通知。连续调用会排队执行，不会交错 */
+/** 按最新的待办、课表、考试与选课提醒重排本地通知。连续调用会排队执行，不会交错 */
 export function syncLocalReminders(todos: Todo[], extra?: Omit<SyncPayload, 'todos'>): Promise<void> {
   const user = useAuth.getState().user;
   const payload: SyncPayload = {
     todos,
     timetable: extra?.timetable,
     exams: extra?.exams,
+    courseSelections: extra?.courseSelections,
     campusId: extra?.campusId ?? user?.campusId ?? null,
     classRemindMinutes: extra?.classRemindMinutes ?? user?.classRemindMinutes ?? 0,
   };
@@ -46,11 +48,13 @@ export function resyncLocalReminders(queryClient: QueryClient): Promise<void> {
   const todos = queryClient.getQueryData<Todo[]>(keys.todos) ?? [];
   const timetable = queryClient.getQueryData<TimetableData>(keys.timetable);
   const exams = queryClient.getQueryData<ExamData>(keys.exams);
+  const courseSelections = queryClient.getQueryData<CourseSelectionReminder[]>(keys.courseSelections);
   const user = useAuth.getState().user;
   if (!user) return Promise.resolve();
   return syncLocalReminders(todos, {
     timetable,
     exams,
+    courseSelections,
     campusId: user.campusId,
     classRemindMinutes: user.classRemindMinutes,
   });
@@ -93,14 +97,16 @@ export async function initLocalReminders(queryClient: QueryClient, router: { nav
     const todos = queryClient.getQueryData<Todo[]>(keys.todos);
     const timetable = queryClient.getQueryData<TimetableData>(keys.timetable);
     const exams = queryClient.getQueryData<ExamData>(keys.exams);
+    const courseSelections = queryClient.getQueryData<CourseSelectionReminder[]>(keys.courseSelections);
     const user = useAuth.getState().user;
-    if (!user || (!todos && !timetable && !exams)) return;
-    const sig = `${user.id}:${user.campusId ?? ''}:${user.classRemindMinutes}:${todos?.length ?? -1}:${timetable?.courses.length ?? -1}:${exams?.exams.length ?? -1}`;
+    if (!user || (!todos && !timetable && !exams && !courseSelections)) return;
+    const sig = `${user.id}:${user.campusId ?? ''}:${user.classRemindMinutes}:${todos?.length ?? -1}:${timetable?.courses.length ?? -1}:${exams?.exams.length ?? -1}:${courseSelections?.length ?? -1}`;
     if (!force && sig === lastSig) return;
     lastSig = sig;
     void syncLocalReminders(todos ?? [], {
       timetable,
       exams,
+      courseSelections,
       campusId: user.campusId,
       classRemindMinutes: user.classRemindMinutes,
     });
@@ -110,7 +116,8 @@ export async function initLocalReminders(queryClient: QueryClient, router: { nav
       event.type === 'updated' &&
       (event.query.queryKey[0] === keys.todos[0] ||
         event.query.queryKey[0] === keys.timetable[0] ||
-        event.query.queryKey[0] === keys.exams[0])
+        event.query.queryKey[0] === keys.exams[0] ||
+        event.query.queryKey[0] === keys.courseSelections[0])
     ) {
       sync(true);
     }

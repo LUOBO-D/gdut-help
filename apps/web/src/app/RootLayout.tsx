@@ -18,7 +18,7 @@ export function RootLayout() {
   const queryClient = useQueryClient();
   const { pathname } = useLocation();
   const isMapRoute = pathname.startsWith('/map');
-  const scene = useScene();
+  const { scene, timePhase } = useScene();
   const status = useAuth((s) => s.status);
   const showFps = useQualityStore((s) => s.showFps);
   useQualityDetection();
@@ -51,7 +51,7 @@ export function RootLayout() {
   return (
     <>
       {/* 校园 3D 地图拥有独立昼夜天空与 WebGL 上下文，进入 /map 时暂停全局天空背景避免双 WebGL 争抢移动端显存 */}
-      {!isMapRoute && <SkyBackground scene={scene} />}
+      {!isMapRoute && <SkyBackground scene={scene} timePhase={timePhase} />}
       <OfflineBanner />
       {showFps && <FpsMeter />}
       <Outlet />

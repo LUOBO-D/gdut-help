@@ -4,6 +4,12 @@ export * from './auth.js';
 export * from './calendar.js';
 export * from './campus-map.js';
 export * from './campus-services.js';
+export * from './cet.js';
+export { cetRecordInputSchema, cetSyncSchema } from './cet-schema.js';
+export type { CetRecordInput, CetSyncRequest, CetSyncResult } from './cet-schema.js';
+export * from './course-selection.js';
+export { courseSelectionInputSchema, courseSelectionSyncSchema } from './course-selection-schema.js';
+export type { CourseSelectionInput, CourseSelectionSyncRequest } from './course-selection-schema.js';
 export * from './course-review.js';
 export {
   catalogImportItemSchema,

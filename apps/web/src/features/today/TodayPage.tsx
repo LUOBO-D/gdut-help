@@ -1,10 +1,20 @@
-import { dayOffset, examCountdownText, formatWhen, nextUpcomingExam, today, weekOf } from '@gduthelp/shared';
+import {
+  dayOffset,
+  examCountdownText,
+  formatWhen,
+  nextActiveSelection,
+  nextUpcomingExam,
+  selectionCountdownText,
+  selectionStatus,
+  today,
+  weekOf,
+} from '@gduthelp/shared';
 import { motion } from 'motion/react';
 import { Link } from 'react-router';
 import { GlassCard } from '../../components/GlassCard';
 import { ChevronRightIcon } from '../../components/icons';
 import { useAuth } from '../../lib/auth-store';
-import { useExams, useTimetable, useTodos } from '../../lib/queries';
+import { useCourseSelections, useExams, useTimetable, useTodos } from '../../lib/queries';
 import { useNow } from '../../lib/use-now';
 import { stagger } from '../../motion/presets';
 import { NotificationsButton } from './NotificationsButton';
@@ -34,9 +44,17 @@ export function TodayPage() {
   const now = useNow();
   const semester = useTimetable().data?.semester;
   const exams = useExams().data?.exams;
+  const selections = useCourseSelections().data;
   const todos = useTodos().data;
   const week = semester ? weekOf(semester, today(now)) : null;
   const nextExam = exams ? nextUpcomingExam(exams, now) : null;
+  const nextSelectionCandidate = selections ? nextActiveSelection(selections, now) : null;
+  const nextSelection =
+    nextSelectionCandidate &&
+    (selectionStatus(nextSelectionCandidate, now) === 'ongoing' ||
+      new Date(nextSelectionCandidate.startAt).getTime() - now.getTime() <= 7 * 24 * 3600_000)
+      ? nextSelectionCandidate
+      : null;
   const hour = now.getHours();
   // 饭点时段（11:00–13:00 / 17:00–19:00）在餐食卡片打上轻盈「饭点」提示，不再打乱页面排版顺序
   const mealPriority = (hour >= 11 && hour < 13) || (hour >= 17 && hour < 19);
@@ -59,7 +77,7 @@ export function TodayPage() {
       })()
     : null;
 
-  const hasAlerts = Boolean((urgentDdl && ddlBadge) || nextExam);
+  const hasAlerts = Boolean((urgentDdl && ddlBadge) || nextExam || nextSelection);
 
   return (
     <div className="space-y-4">
@@ -118,6 +136,26 @@ export function TodayPage() {
                 </span>
                 <span className="inline-flex shrink-0 items-center gap-0.5 font-num font-medium text-accent tabular-nums">
                   {examCountdownText(nextExam, now)}
+                  <ChevronRightIcon size={13} />
+                </span>
+              </Link>
+            )}
+            {nextSelection && (
+              <Link
+                to="/study?tab=reviews"
+                className="flex items-center justify-between gap-3 px-4 py-2.5 text-xs transition-opacity hover:opacity-85"
+              >
+                <span className="flex min-w-0 items-center gap-2">
+                  <span
+                    className={`size-1.5 shrink-0 rounded-full ${
+                      selectionStatus(nextSelection, now) === 'ongoing' ? 'bg-emerald-500' : 'bg-accent'
+                    }`}
+                    aria-hidden
+                  />
+                  <span className="truncate font-medium">选课：{nextSelection.title}</span>
+                </span>
+                <span className="inline-flex shrink-0 items-center gap-0.5 font-num font-medium text-accent tabular-nums">
+                  {selectionCountdownText(nextSelection, now)}
                   <ChevronRightIcon size={13} />
                 </span>
               </Link>

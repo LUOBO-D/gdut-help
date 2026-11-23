@@ -16,6 +16,7 @@ import { useSharedCourses } from '../../lib/queries';
 import { spring } from '../../motion/presets';
 import { CourseReviewDetailSheet } from './CourseReviewDetailSheet';
 import { CourseReviewEditorSheet, type CourseReviewDraft } from './CourseReviewEditorSheet';
+import { CourseSelectionBanner } from './CourseSelectionBanner';
 import { ElectiveCatalogSyncSheet } from './ElectiveCatalogSyncSheet';
 
 const SORT_ITEMS: { id: CourseSortOption; label: string }[] = [
@@ -46,6 +47,10 @@ export function CourseReviewPanel() {
   const [selectedCourseId, setSelectedCourseId] = useState<string | null>(null);
   const [editorDraft, setEditorDraft] = useState<CourseReviewDraft | null>(null);
   const [catalogSyncOpen, setCatalogSyncOpen] = useState(false);
+  const [filtersOpen, setFiltersOpen] = useState(false);
+
+  const activeFilterCount =
+    (subCategory ? 1 : 0) + (tag ? 1 : 0) + (onlyReviewed ? 1 : 0) + (sort !== 'bayes' ? 1 : 0);
 
   const coursesQuery = useSharedCourses({
     q: keyword.trim() || undefined,
@@ -76,33 +81,25 @@ export function CourseReviewPanel() {
     setPage(1);
   };
 
-  return (
-    <div className="space-y-4">
-      {/* 顶部共享库说明 + 导入目录 / 写评价 */}
-      <GlassCard className="flex flex-wrap items-center justify-between gap-3 p-4">
-        <div className="min-w-0">
-          <h2 className="text-[15px] font-semibold">广工公共选修 & 体育选课共享库</h2>
-          <p className="mt-0.5 text-xs text-fg-muted">
-            已收录 <strong className="font-num text-fg tabular-nums">{total}</strong> 门课程 · 全校共建共享
-          </p>
-        </div>
-        <div className="flex shrink-0 items-center gap-1.5">
-          <Button variant="ghost" className="h-9 px-3 text-xs" onClick={() => setCatalogSyncOpen(true)}>
-            导入目录
-          </Button>
-          <Button className="h-9 gap-1 px-3.5 text-xs" onClick={() => setEditorDraft({})}>
-            <PlusIcon size={15} />
-            写评价
-          </Button>
-        </div>
-      </GlassCard>
+  const resetFilters = () => {
+    setSubCategory(undefined);
+    setTag(undefined);
+    setOnlyReviewed(false);
+    setSort('bayes');
+    setPage(1);
+  };
 
-      {/* 两大主分类切换：全部 | 公共选修课 | 体育选课 */}
+  return (
+    <div className="space-y-3.5">
+      {/* 1. 极简单行选课时间提醒条 */}
+      <CourseSelectionBanner />
+
+      {/* 2. 两大主分类切换：全部 | 公共选修 | 体育选课 */}
       <div className="glass-thin grid grid-cols-3 rounded-full p-1" role="tablist" aria-label="选修课分类">
         {(
           [
             { id: undefined, label: '全部选修' },
-            { id: 'general_elective', label: '公共选修课' },
+            { id: 'general_elective', label: '公共选修' },
             { id: 'pe', label: '体育选课' },
           ] as const
         ).map((item) => {
@@ -114,7 +111,7 @@ export function CourseReviewPanel() {
               role="tab"
               aria-selected={active}
               onClick={() => selectCategory(item.id)}
-              className={`relative rounded-full py-2 text-xs font-medium transition-colors sm:text-sm ${
+              className={`relative rounded-full py-1.5 text-xs font-medium transition-colors sm:text-sm ${
                 active ? 'font-semibold text-accent-fg' : 'text-fg-muted'
               }`}
             >
@@ -131,125 +128,179 @@ export function CourseReviewPanel() {
         })}
       </div>
 
-      {/* 搜索 + 子模块 + 排序 + 快捷标签 */}
-      <div className="space-y-2.5">
-        <div className="glass-thin flex items-center gap-2 rounded-2xl px-3.5 py-2.5">
-          <SearchIcon size={16} className="shrink-0 text-fg-muted" />
-          <input
-            type="search"
-            value={keyword}
-            onChange={(e) => {
-              setKeyword(e.target.value);
-              setPage(1);
-            }}
-            placeholder={
-              category === 'pe'
-                ? '搜体育项目或老师（羽毛球 / 游泳 / 瑜伽 / 飞镖…）'
-                : '搜公选课名、老师、课号或标签（岭南衣裳 / 美育 / 不点名…）'
-            }
-            className="w-full bg-transparent text-sm outline-none placeholder:text-fg-muted/75"
-          />
-          {keyword && (
-            <button
-              type="button"
-              onClick={() => {
-                setKeyword('');
+      {/* 3. 精简搜索 + 筛选折叠开关 + 写评价 */}
+      <div className="space-y-2">
+        <div className="flex items-center gap-2">
+          <div className="glass-thin flex min-w-0 flex-1 items-center gap-2 rounded-2xl px-3.5 py-2">
+            <SearchIcon size={15} className="shrink-0 text-fg-muted" />
+            <input
+              type="search"
+              value={keyword}
+              onChange={(e) => {
+                setKeyword(e.target.value);
                 setPage(1);
               }}
-              aria-label="清空搜索"
-              className="text-fg-muted hover:text-fg"
-            >
-              <XIcon size={15} />
-            </button>
-          )}
+              placeholder={
+                category === 'pe'
+                  ? '搜体育项目或老师（羽毛球 / 游泳…）'
+                  : '搜公选课名、老师或课号…'
+              }
+              className="w-full bg-transparent text-sm outline-none placeholder:text-fg-muted/75"
+            />
+            {keyword && (
+              <button
+                type="button"
+                onClick={() => {
+                  setKeyword('');
+                  setPage(1);
+                }}
+                aria-label="清空搜索"
+                className="text-fg-muted hover:text-fg"
+              >
+                <XIcon size={15} />
+              </button>
+            )}
+          </div>
+
+          <button
+            type="button"
+            onClick={() => setFiltersOpen((v) => !v)}
+            className={`glass-thin flex h-9 shrink-0 items-center gap-1 rounded-2xl px-3 text-xs font-medium transition-colors ${
+              filtersOpen || activeFilterCount > 0 ? 'text-accent ring-1 ring-accent/40' : 'text-fg-muted hover:text-fg'
+            }`}
+          >
+            <span>筛选</span>
+            {activeFilterCount > 0 && (
+              <span className="rounded-full bg-accent px-1.5 py-0.2 font-num text-[10px] font-bold text-accent-fg tabular-nums">
+                {activeFilterCount}
+              </span>
+            )}
+          </button>
+
+          <Button className="h-9 shrink-0 gap-1 px-3 text-xs" onClick={() => setEditorDraft({})}>
+            <PlusIcon size={14} />
+            写评价
+          </Button>
         </div>
 
-        {/* 子模块快捷筛选 */}
-        {subChips && (
-          <div className="flex flex-wrap gap-1.5">
-            <button
-              type="button"
-              onClick={() => {
-                setSubCategory(undefined);
-                setPage(1);
-              }}
-              className={`rounded-full px-3 py-1 text-xs font-medium transition-colors ${
-                !subCategory ? 'bg-accent text-accent-fg' : 'glass-thin text-fg-muted hover:text-fg'
-              }`}
-            >
-              全部模块
-            </button>
-            {subChips.map((sub) => (
-              <button
-                key={sub}
-                type="button"
-                onClick={() => {
-                  setSubCategory(subCategory === sub ? undefined : sub);
-                  setPage(1);
-                }}
-                className={`rounded-full px-3 py-1 text-xs font-medium transition-colors ${
-                  subCategory === sub ? 'bg-accent text-accent-fg' : 'glass-thin text-fg-muted hover:text-fg'
-                }`}
-              >
-                {sub}
-              </button>
-            ))}
-          </div>
-        )}
+        {/* 轻盈状态行：收录数量 + 导入目录 */}
+        <div className="flex items-center justify-between px-1 text-[11px] text-fg-muted">
+          <span>
+            共 <strong className="font-num text-fg tabular-nums">{total}</strong> 门课程
+            {activeFilterCount > 0 && (
+              <>
+                {' · '}
+                <button type="button" onClick={resetFilters} className="text-accent hover:underline">
+                  清空筛选
+                </button>
+              </>
+            )}
+          </span>
+          <button
+            type="button"
+            onClick={() => setCatalogSyncOpen(true)}
+            className="font-medium text-accent hover:underline"
+          >
+            同步 / 导入公选目录
+          </button>
+        </div>
 
-        {/* 排序 + 只看已评 + 热门标签 */}
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <div className="flex flex-wrap items-center gap-1">
-            {SORT_ITEMS.map((item) => (
-              <button
-                key={item.id}
-                type="button"
-                onClick={() => {
-                  setSort(item.id);
-                  setPage(1);
-                }}
-                className={`rounded-full px-2.5 py-1 text-[11px] font-medium transition-colors ${
-                  sort === item.id ? 'bg-accent/18 font-semibold text-accent' : 'text-fg-muted hover:text-fg'
-                }`}
-              >
-                {item.label}
-              </button>
-            ))}
-            <button
-              type="button"
-              onClick={() => {
-                setOnlyReviewed((v) => !v);
-                setPage(1);
-              }}
-              className={`rounded-full px-2.5 py-1 text-[11px] font-medium transition-colors ${
-                onlyReviewed ? 'bg-accent text-accent-fg' : 'surface-subtle text-fg-muted hover:text-fg'
-              }`}
-            >
-              仅看有评价
-            </button>
-          </div>
+        {/* 折叠筛选面板：按需展开，保持默认列表清爽直接 */}
+        {filtersOpen && (
+          <GlassCard variant="thin" className="space-y-3 rounded-2xl! p-3.5">
+            {subChips && (
+              <div className="space-y-1.5">
+                <p className="text-[11px] font-medium text-fg-muted">课程模块</p>
+                <div className="flex flex-wrap gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSubCategory(undefined);
+                      setPage(1);
+                    }}
+                    className={`rounded-full px-2.5 py-1 text-xs font-medium transition-colors ${
+                      !subCategory ? 'bg-accent text-accent-fg' : 'surface-subtle text-fg-muted hover:text-fg'
+                    }`}
+                  >
+                    全部模块
+                  </button>
+                  {subChips.map((sub) => (
+                    <button
+                      key={sub}
+                      type="button"
+                      onClick={() => {
+                        setSubCategory(subCategory === sub ? undefined : sub);
+                        setPage(1);
+                      }}
+                      className={`rounded-full px-2.5 py-1 text-xs font-medium transition-colors ${
+                        subCategory === sub ? 'bg-accent text-accent-fg' : 'surface-subtle text-fg-muted hover:text-fg'
+                      }`}
+                    >
+                      {sub}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
 
-          <div className="flex flex-wrap gap-1">
-            {QUICK_FILTER_TAGS.map((t) => {
-              const active = tag === t;
-              return (
+            <div className="space-y-1.5">
+              <p className="text-[11px] font-medium text-fg-muted">排序方式</p>
+              <div className="flex flex-wrap items-center gap-1.5">
+                {SORT_ITEMS.map((item) => (
+                  <button
+                    key={item.id}
+                    type="button"
+                    onClick={() => {
+                      setSort(item.id);
+                      setPage(1);
+                    }}
+                    className={`rounded-full px-2.5 py-1 text-xs font-medium transition-colors ${
+                      sort === item.id ? 'bg-accent/18 font-semibold text-accent' : 'surface-subtle text-fg-muted hover:text-fg'
+                    }`}
+                  >
+                    {item.label}
+                  </button>
+                ))}
                 <button
-                  key={t}
                   type="button"
                   onClick={() => {
-                    setTag(active ? undefined : t);
+                    setOnlyReviewed((v) => !v);
                     setPage(1);
                   }}
-                  className={`rounded-full px-2.5 py-0.5 text-[11px] font-medium transition-colors ${
-                    active ? 'bg-accent text-accent-fg' : 'surface-subtle text-fg-muted hover:text-fg'
+                  className={`rounded-full px-2.5 py-1 text-xs font-medium transition-colors ${
+                    onlyReviewed ? 'bg-accent text-accent-fg' : 'surface-subtle text-fg-muted hover:text-fg'
                   }`}
                 >
-                  #{t}
+                  仅看有评价
                 </button>
-              );
-            })}
-          </div>
-        </div>
+              </div>
+            </div>
+
+            <div className="space-y-1.5">
+              <p className="text-[11px] font-medium text-fg-muted">热门口碑标签</p>
+              <div className="flex flex-wrap gap-1.5">
+                {QUICK_FILTER_TAGS.map((t) => {
+                  const active = tag === t;
+                  return (
+                    <button
+                      key={t}
+                      type="button"
+                      onClick={() => {
+                        setTag(active ? undefined : t);
+                        setPage(1);
+                      }}
+                      className={`rounded-full px-2.5 py-0.5 text-xs font-medium transition-colors ${
+                        active ? 'bg-accent text-accent-fg' : 'surface-subtle text-fg-muted hover:text-fg'
+                      }`}
+                    >
+                      #{t}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          </GlassCard>
+        )}
       </div>
 
       {/* 课程卡片列表 */}

@@ -2,15 +2,25 @@ import {
   DEFAULT_CREDIT_PLAN,
   defaultAcademicYear,
   defaultSemesterCode,
+  parseJwCetScores,
+  type CetRecord,
+  type CetSyncResult,
   type CourseGrade,
 } from '@gduthelp/shared';
 import { useQueryClient } from '@tanstack/react-query';
 import { motion } from 'motion/react';
 import { lazy, Suspense, useCallback, useEffect, useState } from 'react';
-import { Button } from '../../components/Button';
-import { PlusIcon } from '../../components/icons';
+import { api } from '../../lib/api';
+import { jwCetScoresPayload, JwLoginRequired, loginToJw } from '../../lib/jw';
 import { isNative } from '../../lib/platform';
-import { useCreditPlan, useCurrentFitness, useGrades, useSecondClassSummary } from '../../lib/queries';
+import {
+  keys,
+  useCetRecords,
+  useCreditPlan,
+  useCurrentFitness,
+  useGrades,
+  useSecondClassSummary,
+} from '../../lib/queries';
 import {
   getAutoSyncEnabled,
   setAutoSyncEnabled,
@@ -23,6 +33,8 @@ import {
 } from '../../lib/scores-sync';
 import { toast } from '../../lib/toast-store';
 import { spring } from '../../motion/presets';
+import { CetEditorSheet, type CetDraft } from './CetEditorSheet';
+import { CetPanel } from './CetPanel';
 import { CreditPlanEditorSheet } from './CreditPlanEditorSheet';
 import { CreditProgressPanel } from './CreditProgressPanel';
 import { CurrentFitnessEditorSheet } from './CurrentFitnessEditorSheet';
@@ -40,14 +52,15 @@ const GradeImportSheet = lazy(() =>
   import('./GradeImportSheet').then((m) => ({ default: m.GradeImportSheet })),
 );
 
-export type ScoresSubTab = 'gpa' | 'credits' | 'secondClass' | 'fitness';
+export type ScoresSubTab = 'gpa' | 'credits' | 'secondClass' | 'fitness' | 'cet';
 const TAB_STORAGE_KEY = 'gduthelp-scores-tab';
 const EMPTY_GRADES: CourseGrade[] = [];
+const EMPTY_CET: CetRecord[] = [];
 
 function readSavedSubTab(): ScoresSubTab {
   try {
     const saved = localStorage.getItem(TAB_STORAGE_KEY);
-    if (saved === 'gpa' || saved === 'credits' || saved === 'secondClass' || saved === 'fitness') {
+    if (saved === 'gpa' || saved === 'credits' || saved === 'secondClass' || saved === 'fitness' || saved === 'cet') {
       return saved;
     }
   } catch {
@@ -57,7 +70,7 @@ function readSavedSubTab(): ScoresSubTab {
 }
 
 interface ScoresContentProps {
-  /** 从外部深链指定初始子面板（例如 /study?tab=scores&sub=credits） */
+  /** 从外部深链指定初始子面板（例如 /study?tab=scores&sub=cet） */
   requestedSub?: ScoresSubTab | null;
   /** 切换子面板后用于清理 URL 上的 sub 参数 */
   onSubChange?: (next: ScoresSubTab) => void;
@@ -65,10 +78,7 @@ interface ScoresContentProps {
 
 /**
  * 成绩与学业进度统一内容区（位于「学业 → 成绩」下）：
- * - 绩点：广工 5.0 制 GPA 统计与自动同步
- * - 学分：毕业学分五大模块修读进度与培养方案核验
- * - 二课：当前学期 & 当前学年第二课堂时长查询
- * - 体测：当前学年体测直查与国家标准算分
+ * 简洁全宽 5 段切换（绩点 · 学分 · 二课 · 体测 · 四六级），操作收拢至各自卡片内部，消除重复工具栏。
  */
 export function ScoresContent({ requestedSub = null, onSubChange }: ScoresContentProps) {
   const qc = useQueryClient();
@@ -82,10 +92,12 @@ export function ScoresContent({ requestedSub = null, onSubChange }: ScoresConten
   const creditPlanQuery = useCreditPlan();
   const secondClassQuery = useSecondClassSummary(academicYear, semesterCode);
   const fitnessQuery = useCurrentFitness(academicYear);
+  const cetQuery = useCetRecords();
 
   const grades = gradesQuery.data?.grades ?? EMPTY_GRADES;
   const creditPlan = creditPlanQuery.data ?? DEFAULT_CREDIT_PLAN;
   const currentFitness = fitnessQuery.data?.record ?? null;
+  const cetRecords = cetQuery.data ?? EMPTY_CET;
 
   const [gradeSyncing, setGradeSyncing] = useState(false);
   const [gradeHint, setGradeHint] = useState<string | null>(null);
@@ -94,6 +106,8 @@ export function ScoresContent({ requestedSub = null, onSubChange }: ScoresConten
   const [scHint, setScHint] = useState<string | null>(null);
   const [fitnessSyncing, setFitnessSyncing] = useState(false);
   const [fitnessHint, setFitnessHint] = useState<string | null>(null);
+  const [cetSyncing, setCetSyncing] = useState(false);
+  const [cetHint, setCetHint] = useState<string | null>(null);
 
   const [gradeDraft, setGradeDraft] = useState<GradeDraft | null>(null);
   const [gradeImportOpen, setGradeImportOpen] = useState(false);
@@ -102,6 +116,7 @@ export function ScoresContent({ requestedSub = null, onSubChange }: ScoresConten
   const [scDraft, setScDraft] = useState<SecondClassDraft | null>(null);
   const [scImportOpen, setScImportOpen] = useState(false);
   const [fitnessEditOpen, setFitnessEditOpen] = useState(false);
+  const [cetDraft, setCetDraft] = useState<CetDraft>(null);
 
   const switchTab = (next: ScoresSubTab) => {
     setLocalTab(next);
@@ -117,7 +132,7 @@ export function ScoresContent({ requestedSub = null, onSubChange }: ScoresConten
     const next = !autoSync;
     setAutoSync(next);
     setAutoSyncEnabled(next);
-    toast.info(next ? '已开启自动更新：进入成绩页将静默刷新最新数据' : '已暂停自动更新，可随时点击手动刷新');
+    toast.info(next ? '已开启自动更新：进入成绩页将静默刷新最新数据' : '已暂停自动更新，可随时手动刷新');
   };
 
   const runGradeSync = useCallback(
@@ -208,6 +223,43 @@ export function ScoresContent({ requestedSub = null, onSubChange }: ScoresConten
     [qc, academicYear, currentFitness?.gender, currentFitness?.gradeYear],
   );
 
+  const runCetSync = useCallback(async () => {
+    if (!isNative) return;
+    setCetSyncing(true);
+    setCetHint(null);
+    try {
+      let raw = await jwCetScoresPayload();
+      if (!raw) {
+        const ok = await loginToJw();
+        if (ok) raw = await jwCetScoresPayload();
+      }
+      const parsed = parseJwCetScores(raw);
+      if (parsed.length === 0) {
+        setCetHint('教务系统暂未同步四六级记录，建议点击上方「中国教育考试网查分」后粘贴存档。');
+        toast.info('教务暂未返回四六级成绩，可直接走教育考试网查询');
+        return;
+      }
+      const res = await api<CetSyncResult>('/cet/sync', {
+        method: 'POST',
+        body: {
+          records: parsed.map((p) => ({ ...p, note: null })),
+        },
+      });
+      void qc.invalidateQueries({ queryKey: keys.cetRecords });
+      toast.success(`已同步 ${parsed.length} 条四六级成绩（新增 ${res.added}，更新 ${res.updated}）`);
+    } catch (err) {
+      if (err instanceof JwLoginRequired) {
+        setCetHint('请先完成广工统一认证后再同步。');
+      } else {
+        const msg = err instanceof Error ? err.message : '同步失败';
+        setCetHint(msg);
+        toast.error(msg);
+      }
+    } finally {
+      setCetSyncing(false);
+    }
+  }, [qc]);
+
   // 安卓端自动静默刷新：进入成绩视图或切回前台且超过冷却时间，自动后台同步当前面板
   useEffect(() => {
     if (!isNative || !autoSync) return;
@@ -236,102 +288,58 @@ export function ScoresContent({ requestedSub = null, onSubChange }: ScoresConten
 
   return (
     <div className="space-y-3.5">
-      {/* 子功能工具条：绩点 / 学分 / 二课 / 体测四段切换 + 快捷操作 */}
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <div className="glass-thin inline-flex rounded-full p-1" role="tablist" aria-label="成绩与进度视图">
-          {(
-            [
-              { id: 'gpa', label: '绩点' },
-              { id: 'credits', label: '学分' },
-              { id: 'secondClass', label: '二课' },
-              { id: 'fitness', label: '体测' },
-            ] as const
-          ).map((item) => {
-            const active = tab === item.id;
-            return (
-              <button
-                key={item.id}
-                type="button"
-                role="tab"
-                aria-selected={active}
-                onClick={() => switchTab(item.id)}
-                className={`relative rounded-full px-3 py-1 text-xs font-medium transition-colors ${
-                  active ? 'text-accent-fg' : 'text-fg-muted'
-                }`}
-              >
-                {active && (
-                  <motion.span
-                    layoutId="scores-sub-pill"
-                    transition={spring.snappy}
-                    className="absolute inset-0 rounded-full bg-accent"
-                  />
-                )}
-                <span className="relative">{item.label}</span>
-              </button>
-            );
-          })}
-        </div>
-
-        <div className="flex items-center gap-1.5">
-          {isNative && (tab === 'gpa' || tab === 'fitness') && (
+      {/* 全宽整齐 5 段子切换：绩点 · 学分 · 二课 · 体测 · 四六级（零换行挤压、零重复外层按钮） */}
+      <div className="glass-thin grid grid-cols-5 rounded-full p-1" role="tablist" aria-label="成绩与学业进度视图">
+        {(
+          [
+            { id: 'gpa', label: '绩点' },
+            { id: 'credits', label: '学分' },
+            { id: 'secondClass', label: '二课' },
+            { id: 'fitness', label: '体测' },
+            { id: 'cet', label: '四六级' },
+          ] as const
+        ).map((item) => {
+          const active = tab === item.id;
+          return (
             <button
+              key={item.id}
               type="button"
-              onClick={toggleAutoSync}
-              className="glass-thin inline-flex h-8 items-center gap-1.5 rounded-full px-2.5 text-[11px] font-medium text-fg-muted transition-colors hover:text-fg"
-              title="开启后每次进入自动静默更新"
+              role="tab"
+              aria-selected={active}
+              onClick={() => switchTab(item.id)}
+              className={`relative rounded-full py-1.5 text-xs font-medium transition-colors ${
+                active ? 'font-semibold text-accent-fg' : 'text-fg-muted'
+              }`}
             >
-              <span
-                className={`size-1.5 rounded-full ${autoSync ? 'bg-emerald-500' : 'bg-current/30'}`}
-                aria-hidden
-              />
-              <span>{autoSync ? '自动' : '手动'}</span>
+              {active && (
+                <motion.span
+                  layoutId="scores-sub-pill"
+                  transition={spring.snappy}
+                  className="absolute inset-0 rounded-full bg-accent shadow-sm"
+                />
+              )}
+              <span className="relative">{item.label}</span>
             </button>
-          )}
-
-          {tab === 'gpa' ? (
-            <>
-              {isNative ? (
-                <Button variant="ghost" className="h-8 px-2.5 text-xs" loading={gradeSyncing} onClick={() => void runGradeSync(true)}>
-                  同步
-                </Button>
-              ) : (
-                <Button variant="ghost" className="h-8 px-2.5 text-xs" onClick={openGradeImport}>
-                  导入
-                </Button>
-              )}
-              <Button className="h-8 gap-1 px-2.5 text-xs" onClick={() => setGradeDraft({})}>
-                <PlusIcon size={14} />
-                添课
-              </Button>
-            </>
-          ) : tab === 'credits' ? (
-            <Button variant="ghost" className="h-8 px-2.5 text-xs" onClick={() => setCreditPlanOpen(true)}>
-              调目标
-            </Button>
-          ) : tab === 'secondClass' ? (
-            <Button className="h-8 gap-1 px-2.5 text-xs" onClick={() => setScDraft({})}>
-              <PlusIcon size={14} />
-              记活动
-            </Button>
-          ) : (
-            <>
-              {isNative && (
-                <Button
-                  variant="ghost"
-                  className="h-8 px-2.5 text-xs"
-                  loading={fitnessSyncing}
-                  onClick={() => void runFitnessSync(true)}
-                >
-                  查询
-                </Button>
-              )}
-              <Button className="h-8 px-3 text-xs" onClick={() => setFitnessEditOpen(true)}>
-                {currentFitness ? '编辑' : '录入'}
-              </Button>
-            </>
-          )}
-        </div>
+          );
+        })}
       </div>
+
+      {/* 安卓端轻盈单行自动刷新开关（仅在支持自动静默刷新的绩点/体测页展示） */}
+      {isNative && (tab === 'gpa' || tab === 'fitness') && (
+        <div className="flex justify-end px-1">
+          <button
+            type="button"
+            onClick={toggleAutoSync}
+            className="inline-flex items-center gap-1.5 text-[11px] font-medium text-fg-muted transition-colors hover:text-fg"
+          >
+            <span
+              className={`size-1.5 rounded-full ${autoSync ? 'bg-emerald-500' : 'bg-current/30'}`}
+              aria-hidden
+            />
+            <span>{autoSync ? '进页自动刷新已开启' : '自动刷新已暂停'}</span>
+          </button>
+        </div>
+      )}
 
       {tab === 'gpa' ? (
         <GpaPanel
@@ -367,7 +375,7 @@ export function ScoresContent({ requestedSub = null, onSubChange }: ScoresConten
           onOpenImport={() => setScImportOpen(true)}
           onEdit={(record) => setScDraft({ record })}
         />
-      ) : (
+      ) : tab === 'fitness' ? (
         <CurrentFitnessPanel
           academicYear={academicYear}
           record={currentFitness}
@@ -377,6 +385,16 @@ export function ScoresContent({ requestedSub = null, onSubChange }: ScoresConten
           syncHint={fitnessHint}
           onQuery={() => void runFitnessSync(true)}
           onEdit={() => setFitnessEditOpen(true)}
+        />
+      ) : (
+        <CetPanel
+          records={cetRecords}
+          isLoading={cetQuery.isPending}
+          syncing={cetSyncing}
+          syncHint={cetHint}
+          onSyncJw={() => void runCetSync()}
+          onAdd={() => setCetDraft({})}
+          onEdit={(record) => setCetDraft({ record })}
         />
       )}
 
@@ -409,6 +427,7 @@ export function ScoresContent({ requestedSub = null, onSubChange }: ScoresConten
         record={currentFitness}
         onClose={() => setFitnessEditOpen(false)}
       />
+      <CetEditorSheet draft={cetDraft} onClose={() => setCetDraft(null)} />
     </div>
   );
 }

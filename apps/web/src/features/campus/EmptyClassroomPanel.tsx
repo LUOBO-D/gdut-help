@@ -9,14 +9,22 @@ import {
   today,
   weekOf,
   type EmptyClassroom,
+  type EmptyRoomsInferenceResponse,
 } from '@gduthelp/shared';
 import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router';
 import { Button } from '../../components/Button';
 import { GlassCard } from '../../components/GlassCard';
-import { ClockIcon, NavigationIcon, PinIcon } from '../../components/icons';
+import { ClockIcon, ExternalLinkIcon, NavigationIcon, PinIcon } from '../../components/icons';
+import { api } from '../../lib/api';
 import { useAuth } from '../../lib/auth-store';
-import { jwEmptyClassroomsPayload, JwLoginRequired, jwSemesters, loginToJw } from '../../lib/jw';
+import {
+  jwEmptyClassroomsPayload,
+  JwLoginRequired,
+  jwSemesters,
+  loginToJw,
+  openJwEmptyRoomPage,
+} from '../../lib/jw';
 import { isNative } from '../../lib/platform';
 import { useTimetable } from '../../lib/queries';
 import { toast } from '../../lib/toast-store';
@@ -24,10 +32,13 @@ import { useNow } from '../../lib/use-now';
 
 const WEEKDAYS = ['一', '二', '三', '四', '五', '六', '日'] as const;
 
+type RoomSource = 'jw' | 'timetable' | null;
+
 /**
  * 空教室查询与常驻自习空间推荐面板：
- * - 安卓端支持按周次、星期、节次实时直连教务系统查空教室，并一键跳转 3D 校园地图导航；
- * - 全端常驻展示广工热门自习建筑与开放时段，下课顺路直接去自习。
+ * - 安卓端优先通过统一认证自动探测广工教务实时空教室；
+ * - 若学校当前未向学生开放教务空教室 AJAX 接口（或网页端查询），自动无缝降级为「全校已同步课表脱敏空闲推算」，
+ *   同时提供一键打开广工教务原页查看，绝不卡在无解报错。
  */
 export function EmptyClassroomPanel() {
   const navigate = useNavigate();
@@ -53,7 +64,9 @@ export function EmptyClassroomPanel() {
 
   const [querying, setQuerying] = useState(false);
   const [hasQueried, setHasQueried] = useState(false);
-  const [queryError, setQueryError] = useState<string | null>(null);
+  const [roomSource, setRoomSource] = useState<RoomSource>(null);
+  const [queryNote, setQueryNote] = useState<string | null>(null);
+  const [discoveredJwUrl, setDiscoveredJwUrl] = useState<string | null>(null);
   const [rooms, setRooms] = useState<EmptyClassroom[]>([]);
   const [buildingFilter, setBuildingFilter] = useState<string>('全部');
 
@@ -72,50 +85,89 @@ export function EmptyClassroomPanel() {
     return rooms.filter((r) => r.building === buildingFilter);
   }, [rooms, buildingFilter]);
 
-  const queryLiveRooms = async () => {
-    if (!isNative) return;
-    setQuerying(true);
-    setQueryError(null);
+  const queryFallbackFromTimetables = async (): Promise<EmptyRoomsInferenceResponse> => {
+    const qs = new URLSearchParams({
+      week: String(week),
+      weekday: String(weekday),
+      periodStart: String(selectedBlock.startPeriod),
+      periodEnd: String(selectedBlock.endPeriod),
+    });
+    return api<EmptyRoomsInferenceResponse>(`/timetable/empty-rooms?${qs.toString()}`);
+  };
 
-    const run = async () => {
-      const { current } = await jwSemesters();
-      const semesterCode = current?.code ?? calendarTerm.code;
-      const raw = await jwEmptyClassroomsPayload({
-        semesterCode,
-        week,
-        weekday,
-        periodCode,
-      });
-      return parseEmptyClassrooms(raw);
-    };
+  const queryRooms = async () => {
+    setQuerying(true);
+    setQueryNote(null);
 
     try {
-      let result: EmptyClassroom[];
-      try {
-        result = await run();
-      } catch (err) {
-        if (err instanceof JwLoginRequired) {
-          const ok = await loginToJw();
-          if (!ok) {
-            setQueryError('未完成教务系统登录，已取消查询');
+      // 1. 安卓端先尝试直连广工教务实时空教室
+      if (isNative) {
+        let jwAuthed = false;
+        let semesterCode = calendarTerm.code;
+        try {
+          const { current } = await jwSemesters();
+          if (current?.code) semesterCode = current.code;
+          jwAuthed = true;
+        } catch (err) {
+          if (err instanceof JwLoginRequired) {
+            const ok = await loginToJw();
+            if (ok) {
+              try {
+                const { current } = await jwSemesters();
+                if (current?.code) semesterCode = current.code;
+                jwAuthed = true;
+              } catch {
+                jwAuthed = false;
+              }
+            }
+          }
+        }
+
+        if (jwAuthed) {
+          const jwRes = await jwEmptyClassroomsPayload({
+            semesterCode,
+            week,
+            weekday,
+            periodCode,
+          });
+          setDiscoveredJwUrl(jwRes.discoveredPageUrl);
+          const liveRooms = parseEmptyClassrooms(jwRes.raw);
+          if (liveRooms.length > 0) {
+            setRooms(liveRooms);
+            setRoomSource('jw');
+            setBuildingFilter('全部');
+            setHasQueried(true);
+            toast.success(`教务实时查到 ${liveRooms.length} 间空闲教室`);
             return;
           }
-          result = await run();
-        } else {
-          throw err;
         }
       }
-      setRooms(result);
+
+      // 2. 教务未开放学生端空教室接口或网页端使用时，无缝走全校课表脱敏空闲推算
+      const fallback = await queryFallbackFromTimetables();
+      setRooms(fallback.rooms);
+      setRoomSource('timetable');
       setBuildingFilter('全部');
       setHasQueried(true);
-      if (result.length > 0) {
-        toast.success(`已找到 ${result.length} 间空闲教室`);
+
+      if (fallback.rooms.length > 0) {
+        const prefix = isNative
+          ? '学校教务当前未开放学生端空教室直查接口，已自动切换为「全校已导入课表空闲推算」'
+          : '已根据全校已同步课表推算当前时段未排课教室';
+        setQueryNote(
+          `${prefix}（参考 ${fallback.totalKnownRooms} 间校内课室，其中 ${fallback.occupiedCount} 间正在上课）。`,
+        );
+        toast.success(`已推算 ${fallback.rooms.length} 间大概率空闲教室`);
       } else {
-        setQueryError('该时段教务未返回空闲教室记录，可切换节次重试或直接参考下方常驻自习去处');
+        setQueryNote(
+          isNative
+            ? '当前教务未向学生端开放空教室接口，且校内课表样本仍在积累中；可点下方「打开广工教务页」查看或直接前往常驻自习楼。'
+            : '当前时段暂无足够的校内课表样本推算，可直接参考下方广工常驻开放自习楼并一键 3D 导航。',
+        );
       }
     } catch (err) {
-      const msg = err instanceof Error ? err.message : '查询失败，请确认校园网连接后重试';
-      setQueryError(msg);
+      const msg = err instanceof Error ? err.message : '查询暂时受限，请稍后重试';
+      setQueryNote(msg);
       toast.error(msg);
     } finally {
       setQuerying(false);
@@ -205,29 +257,41 @@ export function EmptyClassroomPanel() {
           })}
         </div>
 
-        {isNative ? (
-          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-            <Button className="w-full sm:w-auto" loading={querying} onClick={() => void queryLiveRooms()}>
-              查询教务实时空教室
+        <div className="flex flex-wrap items-center gap-2">
+          <Button className="flex-1 sm:flex-none" loading={querying} onClick={() => void queryRooms()}>
+            {isNative ? '查询当前空教室' : '推算当前空教室'}
+          </Button>
+          {isNative && (
+            <Button
+              variant="ghost"
+              className="gap-1 px-3 text-xs"
+              onClick={() => void openJwEmptyRoomPage(discoveredJwUrl)}
+            >
+              <ExternalLinkIcon size={13} />
+              打开教务原页
             </Button>
-            <p className="text-[11px] text-fg-muted">本机直连广工教务，查询结果支持一键 3D 导航</p>
-          </div>
-        ) : (
+          )}
+        </div>
+
+        {queryNote && (
           <p className="surface-subtle rounded-2xl px-3.5 py-2.5 text-xs leading-relaxed text-fg-muted">
-            教务实时空教室需通过安卓 App 本机直连广工教务获取；下方常驻开放自习楼全端可用，支持一键 3D 校园导航。
+            {queryNote}
           </p>
         )}
-
-        {queryError && <p className="text-xs text-amber-600 dark:text-amber-400">{queryError}</p>}
       </GlassCard>
 
-      {/* 教务实时查询结果 */}
+      {/* 查询结果 */}
       {hasQueried && rooms.length > 0 && (
         <GlassCard className="space-y-3 p-4 sm:p-5">
-          <div className="flex items-center justify-between gap-2">
-            <h3 className="text-sm font-semibold">
-              查询结果 · <span className="font-num text-accent tabular-nums">{filteredRooms.length}</span> 间空闲
-            </h3>
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <h3 className="text-sm font-semibold">
+                空闲教室 · <span className="font-num text-accent tabular-nums">{filteredRooms.length}</span> 间
+              </h3>
+              <span className="rounded-full bg-accent/15 px-2 py-0.5 text-[10px] font-semibold text-accent">
+                {roomSource === 'jw' ? '教务实时' : '校内课表推算'}
+              </span>
+            </div>
             <span className="text-[11px] text-fg-muted">
               第 {week} 周 周{WEEKDAYS[weekday - 1]} {selectedBlock.label}
             </span>

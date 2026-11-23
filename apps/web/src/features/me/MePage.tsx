@@ -24,7 +24,15 @@ import { useAuth } from '../../lib/auth-store';
 import { useOtaStore } from '../../lib/ota-store';
 import { DEFAULT_API_ORIGIN, getApiOrigin, isNative, normalizeApiOrigin, setApiOriginOverride } from '../../lib/platform';
 import { useCurrentFitness, useGrades, usePreferences } from '../../lib/queries';
-import { SCENE_STYLES, SCENES, type Scene } from '../../lib/scene';
+import {
+  SCENE_STYLES,
+  SCENES,
+  TIME_PHASE_LABELS,
+  TIME_PHASES,
+  type Scene,
+  type TimePhase,
+} from '../../lib/scene';
+import { useScene } from '../../lib/use-scene';
 import { toast } from '../../lib/toast-store';
 import { useUi } from '../../lib/ui-store';
 import { pressable, spring } from '../../motion/presets';
@@ -445,39 +453,91 @@ function ProfileCard({ user }: { user: UserProfile }) {
   );
 }
 
-/** 手动预览各天气主题；选「自动」时跟随实时天气 */
+/** 手动预览各天气与时段光影；选「自动」时随实时天气与北京时间自动切换全站 UI */
 function ScenePicker() {
   const override = useUi((s) => s.sceneOverride);
+  const timeOverride = useUi((s) => s.timeOverride);
   const setOverride = useUi((s) => s.setSceneOverride);
+  const setTimeOverride = useUi((s) => s.setTimeOverride);
+  const active = useScene();
   const options: (Scene | null)[] = [null, ...SCENES];
+  const timeOptions: (TimePhase | null)[] = [null, ...TIME_PHASES];
+  const hasOverride = override !== null || timeOverride !== null;
 
   return (
-    <GlassCard className="p-5">
-      <h2 className="text-[15px] font-semibold">主题预览</h2>
-      <p className="mt-1 text-sm text-fg-muted">「自动」跟随实时天气；其他选项只是预览，不影响天气数据</p>
-      <div className="mt-4 grid grid-cols-4 gap-2">
-        {options.map((scene) => {
-          const active = override === scene;
-          return (
-            <motion.button
-              key={scene ?? 'auto'}
-              type="button"
-              {...pressable}
-              onClick={() => setOverride(scene)}
-              className="relative flex flex-col items-center gap-1.5 rounded-2xl p-2 text-xs"
-              aria-pressed={active}
-            >
-              {active && (
-                <motion.span layoutId="scene-active" className="absolute inset-0 rounded-2xl bg-white/25" transition={spring.snappy} />
-              )}
-              <span
-                className="relative size-10 rounded-full border border-white/50 shadow"
-                style={{ background: scene ? SCENE_STYLES[scene].sky : 'conic-gradient(#ffc27a, #4b6cb7, #0f2027, #a1c4fd, #ffc27a)' }}
-              />
-              <span className="relative">{scene ? SCENE_STYLES[scene].label : '自动'}</span>
-            </motion.button>
-          );
-        })}
+    <GlassCard className="space-y-4 p-5">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div>
+          <h2 className="text-[15px] font-semibold">天气与昼夜主题</h2>
+          <p className="mt-0.5 text-xs text-fg-muted">
+            当前生效：
+            <strong className="text-fg">
+              {SCENE_STYLES[active.scene].label} · {TIME_PHASE_LABELS[active.timePhase]}
+            </strong>
+            {hasOverride ? '（预览中）' : '（自动跟随实时天气与时间）'}
+          </p>
+        </div>
+        {hasOverride && (
+          <button
+            type="button"
+            onClick={() => {
+              setOverride(null);
+              setTimeOverride(null);
+            }}
+            className="rounded-full bg-accent/15 px-3 py-1 text-xs font-semibold text-accent hover:opacity-85"
+          >
+            恢复自动
+          </button>
+        )}
+      </div>
+
+      <div>
+        <p className="mb-2 text-xs font-medium text-fg-muted">天气氛围</p>
+        <div className="grid grid-cols-4 gap-2">
+          {options.map((scene) => {
+            const isPicked = override === scene;
+            return (
+              <motion.button
+                key={scene ?? 'auto'}
+                type="button"
+                {...pressable}
+                onClick={() => setOverride(scene)}
+                className="relative flex flex-col items-center gap-1.5 rounded-2xl p-2 text-xs"
+                aria-pressed={isPicked}
+              >
+                {isPicked && (
+                  <motion.span layoutId="scene-active" className="absolute inset-0 rounded-2xl bg-white/25" transition={spring.snappy} />
+                )}
+                <span
+                  className="relative size-9 rounded-full border border-white/50 shadow"
+                  style={{ background: scene ? SCENE_STYLES[scene].sky : 'conic-gradient(#ffc27a, #4b6cb7, #0f2027, #a1c4fd, #ffc27a)' }}
+                />
+                <span className="relative">{scene ? SCENE_STYLES[scene].label : '自动'}</span>
+              </motion.button>
+            );
+          })}
+        </div>
+      </div>
+
+      <div className="border-t border-current/10 pt-3">
+        <p className="mb-2 text-xs font-medium text-fg-muted">时段光影（清晨 / 白天 / 黄昏 / 夜晚）</p>
+        <div className="grid grid-cols-5 gap-1.5">
+          {timeOptions.map((phase) => {
+            const isPicked = timeOverride === phase;
+            return (
+              <button
+                key={phase ?? 'auto-time'}
+                type="button"
+                onClick={() => setTimeOverride(phase)}
+                className={`rounded-xl py-2 text-xs font-medium transition-colors ${
+                  isPicked ? 'bg-accent font-semibold text-accent-fg shadow-sm' : 'surface-subtle text-fg-muted hover:text-fg'
+                }`}
+              >
+                {phase ? TIME_PHASE_LABELS[phase] : '自动'}
+              </button>
+            );
+          })}
+        </div>
       </div>
     </GlassCard>
   );

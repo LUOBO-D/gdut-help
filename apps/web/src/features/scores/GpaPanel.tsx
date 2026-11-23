@@ -146,6 +146,14 @@ export function GpaPanel({
           <div className="flex flex-wrap items-center gap-2">
             <button
               type="button"
+              onClick={onAdd}
+              className="font-medium text-accent hover:underline"
+            >
+              + 添课
+            </button>
+            <span className="text-fg-muted/40">·</span>
+            <button
+              type="button"
               onClick={() => setSimOpen((v) => !v)}
               className="font-medium text-accent hover:underline"
             >

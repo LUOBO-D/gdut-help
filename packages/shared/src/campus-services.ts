@@ -78,13 +78,20 @@ export interface EmptyClassroom {
   mapBuildingId: string | null;
 }
 
+export interface EmptyRoomsInferenceResponse {
+  source: 'timetable';
+  rooms: EmptyClassroom[];
+  occupiedCount: number;
+  totalKnownRooms: number;
+}
+
 const clean = (v: unknown): string | null => {
   if (v === null || v === undefined) return null;
   const s = String(v).replace(/<[^>]+>/g, ' ').replace(/&nbsp;/gi, ' ').replace(/\s+/g, ' ').trim();
   return s && s !== 'null' && s !== 'undefined' && s !== '-' && s !== '--' ? s : null;
 };
 
-function inferBuildingGroup(roomName: string, rawBuilding: string | null): string {
+export function inferBuildingGroup(roomName: string, rawBuilding: string | null = null): string {
   if (rawBuilding) return rawBuilding;
   const mTeach = /(教[1-6一二三四五六])/.exec(roomName);
   if (mTeach) return mTeach[1]!;

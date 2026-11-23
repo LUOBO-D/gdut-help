@@ -62,7 +62,7 @@ function parseStudyTab(params: URLSearchParams): StudyTab | null {
 }
 
 function parseScoreSub(raw: string | null): ScoresSubTab | null {
-  if (raw === 'gpa' || raw === 'credits' || raw === 'secondClass' || raw === 'fitness') return raw;
+  if (raw === 'gpa' || raw === 'credits' || raw === 'secondClass' || raw === 'fitness' || raw === 'cet') return raw;
   return null;
 }
 
@@ -195,10 +195,10 @@ export function TimetablePage() {
           ? `待考 ${upcomingExamCount} 场 · 点击考场可一键 3D 导航`
           : '考试日程与考场 3D 导航'
         : activeTab === 'scores'
-          ? '绩点 · 学分进度 · 第二课堂时长 · 当前学年体测'
+          ? '绩点 · 学分 · 二课 · 体测 · 四六级'
           : activeTab === 'reviews'
-            ? '公共选修课 & 体育选课评价共享库 · 给分/点名一目了然'
-            : '广工官方教学日历 · 周次进度与放假倒计时';
+            ? '选课时间提醒 · 公选与体育评价共享库'
+            : '广工教学日历 · 周次进度与放假倒计时';
 
   const headerAction =
     activeTab === 'timetable' && semester ? (

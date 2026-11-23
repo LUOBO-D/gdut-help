@@ -1,8 +1,9 @@
 @import 'tailwindcss';
 
 /*
- * 设计令牌。每个天气场景通过 <html data-scene="..."> 切换一组变量；
- * 天空渐变本身在 src/lib/scene.ts 中定义，便于做交叉淡化。
+ * 动态设计令牌：由 <html data-scene="..." data-time="..."> 双维度实时驱动。
+ * - data-scene：天气（sunny / cloudy / rain / thunder / snow / fog / night）
+ * - data-time ：时段（dawn 清晨 / day 白天 / dusk 黄昏 / night 夜晚）
  */
 :root {
   --fg: #2b1b12;
@@ -10,22 +11,18 @@
   --accent: #c45a00;
   --accent-fg: #ffffff;
   --danger: #c62828;
-  --glass-tint: 255 255 255;
-  --glass-alpha: 0.28;
-  --glass-border: rgb(255 255 255 / 0.45);
-  --glass-highlight: rgb(255 255 255 / 0.55);
-  --glass-shadow: 0 8px 32px rgb(80 30 10 / 0.18);
+  --glass-tint: 255 248 240;
+  --glass-alpha: 0.3;
+  --glass-border: rgb(255 255 255 / 0.48);
+  --glass-highlight: rgb(255 255 255 / 0.6);
+  --glass-shadow: 0 8px 32px rgb(90 36 10 / 0.16);
   --glass-blur: 24px;
-  /* 画质档位调整模糊半径：高 1、中 0.67（24px → 16px），低档直接关闭模糊 */
   --blur-scale: 1;
-  --field-bg: rgb(255 255 255 / 0.35);
-  /* 无模糊时的玻璃底色：浅色场景偏白，深色场景偏深，保证文字对比度 */
-  --glass-solid: rgb(255 255 255 / 0.6);
-  /* 底部栏、弹窗下面压着内容，需要更不透明 */
-  --glass-solid-thick: rgb(255 255 255 / 0.97);
-  /* 卡片内部的柔和子底色与悬停态（自适应浅/深天气场景） */
-  --surface-subtle: rgb(255 255 255 / 0.24);
-  --surface-hover: rgb(255 255 255 / 0.36);
+  --field-bg: rgb(255 255 255 / 0.36);
+  --glass-solid: rgb(255 250 245 / 0.72);
+  --glass-solid-thick: rgb(255 252 248 / 0.97);
+  --surface-subtle: rgb(255 255 255 / 0.25);
+  --surface-hover: rgb(255 255 255 / 0.38);
   color-scheme: light;
 }
 
@@ -33,51 +30,127 @@
   --blur-scale: 0.67;
 }
 
+/* —— 白天按天气区分材质与强调色 —— */
 [data-scene='cloudy'] {
   --fg: #10233f;
   --fg-muted: rgb(16 35 63 / 0.66);
-  --accent: #1f7ae0;
-  --glass-shadow: 0 8px 32px rgb(20 50 100 / 0.16);
-}
-
-[data-scene='rain'],
-[data-scene='thunder'],
-[data-scene='night'] {
-  --fg: #f4f7ff;
-  --fg-muted: rgb(244 247 255 / 0.72);
-  --glass-tint: 255 255 255;
-  --glass-alpha: 0.12;
-  --glass-border: rgb(255 255 255 / 0.22);
-  --glass-highlight: rgb(255 255 255 / 0.3);
-  --glass-shadow: 0 8px 32px rgb(0 0 0 / 0.3);
-  --field-bg: rgb(255 255 255 / 0.1);
-  --danger: #ff8a80;
-  --glass-solid: rgb(16 26 46 / 0.72);
-  --glass-solid-thick: rgb(16 26 46 / 0.97);
-  --surface-subtle: rgb(255 255 255 / 0.08);
-  --surface-hover: rgb(255 255 255 / 0.14);
-  color-scheme: dark;
-}
-[data-scene='rain'] {
-  --accent: #38e1ff;
-  --accent-fg: #062330;
-}
-[data-scene='thunder'] {
-  --accent: #b388ff;
-  --accent-fg: #1b0d33;
-}
-[data-scene='night'] {
-  --accent: #c9d6ff;
-  --accent-fg: #101a3a;
+  --accent: #1b74e4;
+  --accent-fg: #ffffff;
+  --glass-tint: 242 249 255;
+  --glass-alpha: 0.34;
+  --glass-shadow: 0 8px 32px rgb(20 55 110 / 0.15);
+  --glass-solid: rgb(242 248 255 / 0.76);
+  --glass-solid-thick: rgb(245 250 255 / 0.97);
 }
 
 [data-scene='snow'],
 [data-scene='fog'] {
-  --fg: #1d2735;
-  --fg-muted: rgb(29 39 53 / 0.64);
-  --accent: #3b82c4;
-  --glass-alpha: 0.4;
+  --fg: #1c2736;
+  --fg-muted: rgb(28 39 54 / 0.64);
+  --accent: #2b6cb0;
+  --accent-fg: #ffffff;
+  --glass-tint: 248 251 255;
+  --glass-alpha: 0.44;
   --glass-shadow: 0 8px 32px rgb(40 60 90 / 0.14);
+  --glass-solid: rgb(246 250 255 / 0.8);
+  --glass-solid-thick: rgb(248 251 255 / 0.97);
+}
+
+/* —— 清晨（dawn）：柔和朝霞暖粉紫玻璃 —— */
+[data-time='dawn'] {
+  --fg: #2c1928;
+  --fg-muted: rgb(44 25 40 / 0.68);
+  --accent: #d84a6f;
+  --accent-fg: #ffffff;
+  --glass-tint: 255 243 247;
+  --glass-alpha: 0.32;
+  --glass-border: rgb(255 240 245 / 0.52);
+  --glass-shadow: 0 8px 32px rgb(110 38 72 / 0.16);
+  --glass-solid: rgb(255 246 249 / 0.76);
+  --glass-solid-thick: rgb(255 249 251 / 0.97);
+}
+
+/* —— 黄昏（dusk）：落日琥珀暮色半暗玻璃 —— */
+[data-time='dusk'] {
+  --fg: #fff5ee;
+  --fg-muted: rgb(255 245 238 / 0.75);
+  --accent: #ffa15c;
+  --accent-fg: #2b1204;
+  --danger: #ff8a80;
+  --glass-tint: 34 20 48;
+  --glass-alpha: 0.34;
+  --glass-border: rgb(255 215 190 / 0.24);
+  --glass-highlight: rgb(255 224 200 / 0.32);
+  --glass-shadow: 0 10px 36px rgb(20 8 32 / 0.36);
+  --field-bg: rgb(255 235 225 / 0.12);
+  --glass-solid: rgb(42 26 56 / 0.78);
+  --glass-solid-thick: rgb(36 22 48 / 0.97);
+  --surface-subtle: rgb(255 235 225 / 0.1);
+  --surface-hover: rgb(255 235 225 / 0.17);
+  color-scheme: dark;
+}
+
+/* —— 深色天气（雨 / 雷 / 夜）及任意天气的夜晚时段（data-time='night'） —— */
+[data-scene='rain'],
+[data-scene='thunder'],
+[data-scene='night'],
+[data-time='night'] {
+  --fg: #f4f7ff;
+  --fg-muted: rgb(244 247 255 / 0.74);
+  --glass-tint: 14 24 44;
+  --glass-alpha: 0.34;
+  --glass-border: rgb(255 255 255 / 0.2);
+  --glass-highlight: rgb(255 255 255 / 0.28);
+  --glass-shadow: 0 10px 36px rgb(0 0 0 / 0.34);
+  --field-bg: rgb(255 255 255 / 0.1);
+  --danger: #ff8a80;
+  --glass-solid: rgb(15 25 45 / 0.78);
+  --glass-solid-thick: rgb(14 23 42 / 0.97);
+  --surface-subtle: rgb(255 255 255 / 0.08);
+  --surface-hover: rgb(255 255 255 / 0.15);
+  color-scheme: dark;
+}
+
+/* 夜晚分天气专属点缀色与玻璃色调，确保即便夜间也能一眼分辨当前天气 */
+[data-time='night'][data-scene='cloudy'],
+[data-time='night'][data-scene='fog'],
+[data-time='night'][data-scene='snow'] {
+  --accent: #8cc4ff;
+  --accent-fg: #0b1b33;
+}
+[data-scene='night'],
+[data-time='night'][data-scene='sunny'] {
+  --accent: #c9d6ff;
+  --accent-fg: #101a3a;
+}
+[data-scene='rain'] {
+  --glass-tint: 30 52 88;
+  --glass-solid: rgb(30 52 88 / 0.8);
+  --glass-solid-thick: rgb(26 46 78 / 0.97);
+  --accent: #38e1ff;
+  --accent-fg: #062330;
+}
+[data-time='dusk'][data-scene='rain'] {
+  --glass-tint: 26 34 66;
+  --glass-solid: rgb(28 36 68 / 0.8);
+  --glass-solid-thick: rgb(24 30 58 / 0.97);
+}
+[data-time='night'][data-scene='rain'] {
+  --glass-tint: 10 22 44;
+  --glass-solid: rgb(12 24 46 / 0.82);
+  --glass-solid-thick: rgb(10 20 40 / 0.97);
+}
+[data-scene='thunder'] {
+  --glass-tint: 28 22 48;
+  --glass-solid: rgb(28 22 48 / 0.82);
+  --glass-solid-thick: rgb(24 18 42 / 0.97);
+  --accent: #b388ff;
+  --accent-fg: #1b0d33;
+}
+[data-time='night'][data-scene='thunder'] {
+  --glass-tint: 18 14 34;
+  --glass-solid: rgb(18 14 34 / 0.84);
+  --glass-solid-thick: rgb(15 12 30 / 0.97);
 }
 
 @theme inline {
@@ -89,7 +162,6 @@
   --font-sans:
     'PingFang SC', 'HarmonyOS Sans SC', 'MiSans', 'Noto Sans SC', 'Microsoft YaHei', system-ui, -apple-system,
     sans-serif;
-  /* 温度、时间等数字：优先用西文字体，避免中文字体里的全角符号 */
   --font-num: 'SF Pro Display', 'Helvetica Neue', 'Roboto', 'Segoe UI', Arial, sans-serif;
   --radius-card: 24px;
 }
@@ -102,8 +174,8 @@
   }
   body {
     @apply font-sans text-fg antialiased;
-    background: #8fa7d9;
-    transition: color 1.2s ease;
+    background: #14223b;
+    transition: color 0.8s ease;
     -webkit-tap-highlight-color: transparent;
     overscroll-behavior-y: none;
   }
@@ -114,10 +186,6 @@
 }
 
 @layer components {
-  /*
-   * 玻璃态三档：thin 用于背景提示，默认用于卡片，thick 用于底部栏和弹窗。
-   * --mx / --my 由 GlassCard 根据指针位置写入，生成跟随指针的高光。
-   */
   .glass,
   .glass-thin,
   .glass-thick {
@@ -130,23 +198,23 @@
     box-shadow:
       inset 0 1px 0 var(--glass-highlight),
       var(--glass-shadow);
-    /* 带前缀的写在前面：反过来写时，压缩后的产物会丢掉标准属性，Chrome 就没有模糊效果 */
     -webkit-backdrop-filter: blur(calc(var(--glass-blur) * var(--blur-scale))) saturate(160%);
     backdrop-filter: blur(calc(var(--glass-blur) * var(--blur-scale))) saturate(160%);
     transition:
       background-color 0.6s ease,
-      border-color 0.6s ease;
+      border-color 0.6s ease,
+      box-shadow 0.6s ease;
   }
   .glass-thin {
     --glass-blur: 12px;
-    background: rgb(var(--glass-tint) / calc(var(--glass-alpha) * 0.6));
+    background: rgb(var(--glass-tint) / calc(var(--glass-alpha) * 0.68));
   }
   .glass-thick {
     --glass-blur: 40px;
-    background: rgb(var(--glass-tint) / calc(var(--glass-alpha) + 0.12));
+    background: rgb(var(--glass-tint) / calc(var(--glass-alpha) + 0.16));
   }
 
-  /* 移动端 / 安卓 WebView 流畅度优化：收紧实时模糊半径并去掉二次 saturate 着色 pass，保留高级玻璃通透感同时稳住 60fps */
+  /* 移动端 / 安卓 WebView 流畅度优化 */
   @media (pointer: coarse) {
     .glass,
     .glass-thin {
@@ -159,7 +227,7 @@
       --glass-blur: 18px;
       -webkit-backdrop-filter: blur(calc(var(--glass-blur) * var(--blur-scale)));
       backdrop-filter: blur(calc(var(--glass-blur) * var(--blur-scale)));
-      background: rgb(var(--glass-tint) / calc(var(--glass-alpha) + 0.18));
+      background: rgb(var(--glass-tint) / calc(var(--glass-alpha) + 0.2));
     }
     .glass-sheen::after {
       display: none;
@@ -181,7 +249,6 @@
     );
   }
 
-  /* 低画质或浏览器不支持 backdrop-filter：关闭模糊，用更不透明的纯色保证文字可读 */
   [data-quality='low'] :is(.glass, .glass-thin, .glass-thick) {
     -webkit-backdrop-filter: none;
     backdrop-filter: none;
@@ -198,6 +265,26 @@
     .glass-thick {
       background: var(--glass-solid-thick);
     }
+  }
+
+  /* 低画质 / WebGL 不可用时的全局同步雨雪粒子层 */
+  .css-raindrop {
+    position: absolute;
+    top: -14vh;
+    width: 1.5px;
+    height: 11vh;
+    border-radius: 9999px;
+    background: linear-gradient(to bottom, transparent, rgb(214 235 255 / 0.9));
+    animation: rain-fall linear infinite;
+    will-change: transform;
+  }
+  .css-snowflake {
+    position: absolute;
+    top: -5vh;
+    border-radius: 9999px;
+    background: rgb(255 255 255 / 0.85);
+    animation: snow-fall linear infinite;
+    will-change: transform;
   }
 
   .field {
@@ -253,6 +340,27 @@
   }
   50% {
     transform: translate3d(var(--dx, 6vw), var(--dy, -4vh), 0) scale(1.15);
+  }
+}
+
+@keyframes rain-fall {
+  0% {
+    transform: translate3d(0, 0, 0) rotate(8deg);
+  }
+  100% {
+    transform: translate3d(-6vw, 120vh, 0) rotate(8deg);
+  }
+}
+
+@keyframes snow-fall {
+  0% {
+    transform: translate3d(0, 0, 0);
+  }
+  50% {
+    transform: translate3d(3vw, 55vh, 0);
+  }
+  100% {
+    transform: translate3d(-2vw, 112vh, 0);
   }
 }
 
