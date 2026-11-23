@@ -184,3 +184,27 @@ export const ScoreIcon = (p: IconProps) => (
     <path d="M7 16v-5M12 16V7M17 16v-8" />
   </Icon>
 );
+export const BookOpenIcon = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M2 6.5A2.5 2.5 0 0 1 4.5 4H11v15.5H4.5A2.5 2.5 0 0 0 2 22V6.5Z" />
+    <path d="M22 6.5A2.5 2.5 0 0 0 19.5 4H13v15.5h6.5A2.5 2.5 0 0 1 22 22V6.5Z" />
+  </Icon>
+);
+export const PhoneIcon = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6A19.79 19.79 0 0 1 2.12 4.18 2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.12.96.36 1.9.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.91.34 1.85.58 2.81.7A2 2 0 0 1 22 16.92Z" />
+  </Icon>
+);
+export const ExternalLinkIcon = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M15 3h6v6" />
+    <path d="M10 14 21 3" />
+    <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
+  </Icon>
+);
+export const CopyIcon = (p: IconProps) => (
+  <Icon {...p}>
+    <rect x="9" y="9" width="13" height="13" rx="2" />
+    <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+  </Icon>
+);

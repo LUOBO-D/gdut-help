@@ -109,7 +109,7 @@ export function TodayPage() {
             )}
             {nextExam && (
               <Link
-                to="/timetable?view=exam"
+                to="/study?tab=exam"
                 className="flex items-center justify-between gap-3 px-4 py-2.5 text-xs transition-opacity hover:opacity-85"
               >
                 <span className="flex min-w-0 items-center gap-2">

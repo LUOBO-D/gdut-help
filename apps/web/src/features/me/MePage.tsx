@@ -85,7 +85,7 @@ export function MePage() {
         <section className="space-y-3">
           <h2 className="px-1 text-xs font-semibold tracking-wide text-fg-muted">学业与偏好</h2>
           <GlassCard className="p-5">
-            <Link to="/scores" className="flex w-full items-center justify-between gap-3 text-left">
+            <Link to="/study?tab=scores" className="flex w-full items-center justify-between gap-3 text-left">
               <div className="min-w-0">
                 <h3 className="text-[15px] font-semibold">成绩与体测</h3>
                 <p className="mt-1 truncate text-sm text-fg-muted">{scoresSummary}</p>

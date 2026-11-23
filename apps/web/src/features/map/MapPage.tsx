@@ -621,17 +621,15 @@ export function MapPage() {
         <div className="mx-auto max-w-xl space-y-2">
           <div className={`pointer-events-auto relative rounded-2xl ${panelSurface}`}>
             <div className="flex items-center gap-2 px-3 py-2.5">
-              {!isAuthed && (
-                <button
-                  type="button"
-                  onClick={handleBackToLogin}
-                  className={`grid size-8 shrink-0 place-items-center rounded-full transition-colors ${subtlePill}`}
-                  aria-label="返回登录"
-                  title="返回登录"
-                >
-                  <ArrowLeftIcon size={17} />
-                </button>
-              )}
+              <button
+                type="button"
+                onClick={isAuthed ? () => void navigate('/campus') : handleBackToLogin}
+                className={`grid size-8 shrink-0 place-items-center rounded-full transition-colors ${subtlePill}`}
+                aria-label={isAuthed ? '返回校园' : '返回登录'}
+                title={isAuthed ? '返回校园' : '返回登录'}
+              >
+                <ArrowLeftIcon size={17} />
+              </button>
               <SearchIcon size={18} className={`shrink-0 ${mutedText}`} />
               <input
                 type="text"

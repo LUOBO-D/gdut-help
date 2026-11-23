@@ -30,26 +30,51 @@ import { useExams, useTimetable } from '../../lib/queries';
 import { toast } from '../../lib/toast-store';
 import { useNow } from '../../lib/use-now';
 import { pressable, spring } from '../../motion/presets';
+import type { ScoresSubTab } from '../scores/ScoresContent';
 import { CourseEditor, type CourseDraft } from './CourseEditor';
 import { ExamEditorSheet, type ExamDraft } from './ExamEditorSheet';
 import { ExamPanel } from './ExamPanel';
 import { WEEKDAY_LABEL } from './weekday';
 import { WeekGrid } from './WeekGrid';
 
-// 导入用得少，按需加载
+// 低频子面板与导入弹窗按需加载，控制首屏 JS 体积
 const ImportSheet = lazy(() => import('./ImportSheet').then((m) => ({ default: m.ImportSheet })));
 const ExamImportSheet = lazy(() => import('./ExamImportSheet').then((m) => ({ default: m.ExamImportSheet })));
+const ScoresContent = lazy(() => import('../scores/ScoresContent').then((m) => ({ default: m.ScoresContent })));
+const CalendarPanel = lazy(() => import('../study/CalendarPanel').then((m) => ({ default: m.CalendarPanel })));
 
-type View = 'day' | 'week' | 'exam';
-const VIEW_KEY = 'gduthelp-timetable-view';
+type StudyTab = 'timetable' | 'exam' | 'scores' | 'calendar';
+type TimetableMode = 'day' | 'week';
+
+const MODE_KEY = 'gduthelp-timetable-view';
 const EMPTY_EXAMS: Exam[] = [];
 
-function resolveInitialView(param: string | null): View {
-  if (param === 'exam' || param === 'day' || param === 'week') return param;
-  const saved = localStorage.getItem(VIEW_KEY);
-  return saved === 'week' || saved === 'exam' ? saved : 'day';
+function parseStudyTab(params: URLSearchParams): StudyTab | null {
+  const tab = params.get('tab');
+  if (tab === 'timetable' || tab === 'exam' || tab === 'scores' || tab === 'calendar') return tab;
+  const legacyView = params.get('view');
+  if (legacyView === 'exam') return 'exam';
+  if (legacyView === 'day' || legacyView === 'week') return 'timetable';
+  return null;
 }
 
+function parseScoreSub(raw: string | null): ScoresSubTab | null {
+  if (raw === 'gpa' || raw === 'fitness') return raw;
+  return null;
+}
+
+function readSavedMode(): TimetableMode {
+  try {
+    return localStorage.getItem(MODE_KEY) === 'week' ? 'week' : 'day';
+  } catch {
+    return 'day';
+  }
+}
+
+/**
+ * 统一「学业」中心：把 课表 · 考试 · 成绩（绩点+体测）· 校历 收拢为顶部 4 段切换，
+ * 减少底部主导航栏数量，让所有学习相关操作集中在同一入口下完成。
+ */
 export function TimetablePage() {
   const { data, isPending } = useTimetable();
   const examsQuery = useExams();
@@ -59,10 +84,12 @@ export function TimetablePage() {
   const semester = data?.semester ?? null;
   const todayStr = today(now);
   const currentWeek = semester ? weekOf(semester, todayStr) : null;
+
+  const [localTab, setLocalTab] = useState<StudyTab>('timetable');
+  const [localMode, setLocalMode] = useState<TimetableMode>(readSavedMode);
   const [week, setWeek] = useState<number | null>(null);
   /** 选中的是星期几（1–7）。没选时：本周默认今天，其他周默认周一 */
   const [weekday, setWeekday] = useState<number | null>(null);
-  const [view, setView] = useState<View>(() => resolveInitialView(searchParams.get('view')));
   const [draft, setDraft] = useState<CourseDraft | null>(null);
   const [importing, setImporting] = useState(false);
   /** 打开过一次后保持挂载，关闭时才有收起动画 */
@@ -71,6 +98,11 @@ export function TimetablePage() {
   const [examImporting, setExamImporting] = useState(false);
   const [examImportLoaded, setExamImportLoaded] = useState(false);
   const [shareInfo, setShareInfo] = useState<TimetableShareCreated | null>(null);
+
+  const activeTab: StudyTab = parseStudyTab(searchParams) ?? localTab;
+  const legacyView = searchParams.get('view');
+  const activeMode: TimetableMode = legacyView === 'day' || legacyView === 'week' ? legacyView : localMode;
+  const requestedScoreSub = parseScoreSub(searchParams.get('sub'));
 
   const exams = examsQuery.data?.exams ?? EMPTY_EXAMS;
   const upcomingExamCount = useMemo(
@@ -94,55 +126,39 @@ export function TimetablePage() {
     }
   };
 
-  if (isPending && !data) {
-    return (
-      <>
-        <PageHeader title="课表" subtitle="正在同步课表…" />
-        <CardSkeleton rows={4} />
-      </>
-    );
-  }
-
-  if (!semester) {
-    return (
-      <>
-        <PageHeader title="课表" />
-        <GlassCard className="p-5 text-[15px]">
-          {user?.role === 'admin' ? (
-            <>
-              还没有设置当前学期。请先到{' '}
-              <Link to="/me" className="text-accent underline">
-                我的 → 学期设置
-              </Link>{' '}
-              填写开学日期和总周数。
-            </>
-          ) : (
-            '正在初始化当前学期，稍候刷新即可导入或添加课程。'
-          )}
-        </GlassCard>
-      </>
-    );
-  }
-
-  const shown = week ?? currentWeek ?? (todayStr < semester.startDate ? 1 : semester.totalWeeks);
-  const selectedWeekday = weekday ?? (shown === currentWeek ? parseDate(todayStr).weekday : 1);
-  const selectedDate = dateOf(semester, shown, selectedWeekday);
-  const periods = periodsFor(user?.campusId);
-
-  const goWeek = (w: number) => {
-    const next = Math.min(semester.totalWeeks, Math.max(1, w));
-    setWeek(next);
-    if (next === currentWeek) setWeekday(null);
-  };
-  const changeView = (v: View) => {
-    setView(v);
-    if (v !== 'exam') localStorage.setItem(VIEW_KEY, v);
-    if (searchParams.has('view')) {
-      const next = new URLSearchParams(searchParams);
-      next.delete('view');
-      setSearchParams(next, { replace: true });
+  const switchStudyTab = (next: StudyTab) => {
+    setLocalTab(next);
+    if (searchParams.has('tab') || searchParams.has('view') || searchParams.has('sub')) {
+      const sp = new URLSearchParams(searchParams);
+      sp.delete('tab');
+      sp.delete('view');
+      sp.delete('sub');
+      setSearchParams(sp, { replace: true });
     }
   };
+
+  const switchMode = (next: TimetableMode) => {
+    setLocalMode(next);
+    try {
+      localStorage.setItem(MODE_KEY, next);
+    } catch {
+      // ignore
+    }
+    if (searchParams.has('view')) {
+      const sp = new URLSearchParams(searchParams);
+      sp.delete('view');
+      setSearchParams(sp, { replace: true });
+    }
+  };
+
+  const clearScoreSubParam = () => {
+    if (searchParams.has('sub')) {
+      const sp = new URLSearchParams(searchParams);
+      sp.delete('sub');
+      setSearchParams(sp, { replace: true });
+    }
+  };
+
   const openImport = () => {
     setImportLoaded(true);
     setImporting(true);
@@ -152,70 +168,186 @@ export function TimetablePage() {
     setExamImporting(true);
   };
 
+  const shown = semester ? (week ?? currentWeek ?? (todayStr < semester.startDate ? 1 : semester.totalWeeks)) : 1;
+  const selectedWeekday = semester ? (weekday ?? (shown === currentWeek ? parseDate(todayStr).weekday : 1)) : 1;
+  const selectedDate = semester ? dateOf(semester, shown, selectedWeekday) : todayStr;
+  const periods = periodsFor(user?.campusId);
+
+  const goWeek = (w: number) => {
+    if (!semester) return;
+    const next = Math.min(semester.totalWeeks, Math.max(1, w));
+    setWeek(next);
+    if (next === currentWeek) setWeekday(null);
+  };
+
+  const subtitle =
+    activeTab === 'timetable'
+      ? semester
+        ? `${semester.name} · ${currentWeek ? `本周第 ${currentWeek} 周` : todayStr < semester.startDate ? '还没开学' : '学期已结束'}`
+        : isPending
+          ? '正在同步课表…'
+          : '课表与学期安排'
+      : activeTab === 'exam'
+        ? upcomingExamCount > 0
+          ? `待考 ${upcomingExamCount} 场 · 点击考场可一键 3D 导航`
+          : '考试日程与考场 3D 导航'
+        : activeTab === 'scores'
+          ? '广工 5.0 制绩点与当前学年体测 · 支持自动更新'
+          : '广工官方教学日历 · 周次进度与放假倒计时';
+
+  const headerAction =
+    activeTab === 'timetable' && semester ? (
+      <div className="flex gap-1.5">
+        {data!.courses.length > 0 && (
+          <Button variant="ghost" className="h-9 px-2.5 text-xs" loading={shareMutation.isPending} onClick={() => shareMutation.mutate()}>
+            分享
+          </Button>
+        )}
+        <Button variant="ghost" className="h-9 px-2.5 text-xs" onClick={openImport}>
+          导入
+        </Button>
+        <Button className="h-9 gap-1 px-3 text-xs" onClick={() => setDraft(activeMode === 'day' ? { weekday: selectedWeekday } : {})}>
+          <PlusIcon size={15} />
+          添加
+        </Button>
+      </div>
+    ) : activeTab === 'exam' ? (
+      <div className="flex gap-1.5">
+        <Button variant="ghost" className="h-9 px-2.5 text-xs" onClick={openExamImport}>
+          同步
+        </Button>
+        <Button className="h-9 gap-1 px-3 text-xs" onClick={() => setExamDraft({})}>
+          <PlusIcon size={15} />
+          添加
+        </Button>
+      </div>
+    ) : undefined;
+
   return (
     <>
-      <PageHeader
-        title="课表"
-        subtitle={`${semester.name} · ${currentWeek ? `本周第 ${currentWeek} 周` : todayStr < semester.startDate ? '还没开学' : '学期已结束'}`}
-        action={
-          view === 'exam' ? (
-            <div className="flex gap-2">
-              <Button variant="ghost" className="h-10 px-3 text-sm" onClick={openExamImport}>
-                同步
-              </Button>
-              <Button className="h-10 px-3 text-sm" onClick={() => setExamDraft({})}>
-                <PlusIcon size={18} />
-                添加
-              </Button>
-            </div>
-          ) : (
-            <div className="flex gap-2">
-              {data!.courses.length > 0 && (
-                <Button variant="ghost" className="h-10 px-3 text-sm" loading={shareMutation.isPending} onClick={() => shareMutation.mutate()}>
-                  分享
-                </Button>
-              )}
-              <Button variant="ghost" className="h-10 px-3 text-sm" onClick={openImport}>
-                导入
-              </Button>
-              <Button className="h-10 px-3 text-sm" onClick={() => setDraft(view === 'day' ? { weekday: selectedWeekday } : {})}>
-                <PlusIcon size={18} />
-                添加
-              </Button>
-            </div>
-          )
-        }
-      />
+      <PageHeader title="学业" subtitle={subtitle} action={headerAction} />
 
-      <div className="mb-3 flex items-center justify-between gap-3">
-        <ViewSwitch value={view} onChange={changeView} examCount={upcomingExamCount} />
-        {view !== 'exam' && (
-          <div className="flex items-center gap-1">
-            <button type="button" className="glass-thin grid size-9 place-items-center rounded-full!" aria-label="上一周" disabled={shown <= 1} onClick={() => goWeek(shown - 1)}>
-              <ChevronLeftIcon size={18} />
-            </button>
-            <div className="min-w-[4.5rem] text-center">
-              <p className="text-sm font-semibold">第 {shown} 周</p>
-              {currentWeek !== null && shown !== currentWeek && (
-                <button type="button" className="text-xs text-accent" onClick={() => goWeek(currentWeek)}>
-                  回到本周
+      {/* 顶部统一四段切换：课表 · 考试 · 成绩 · 校历 */}
+      <StudyTabBar value={activeTab} onChange={switchStudyTab} examCount={upcomingExamCount} />
+
+      {activeTab === 'timetable' ? (
+        isPending && !data ? (
+          <CardSkeleton rows={4} />
+        ) : !semester ? (
+          <GlassCard className="p-5 text-[15px]">
+            {user?.role === 'admin' ? (
+              <>
+                还没有设置当前学期。请先到{' '}
+                <Link to="/me" className="text-accent underline">
+                  我的 → 学期设置
+                </Link>{' '}
+                填写开学日期和总周数。
+              </>
+            ) : (
+              '正在初始化当前学期，稍候刷新即可导入或添加课程。'
+            )}
+          </GlassCard>
+        ) : (
+          <>
+            {/* 课表专属二级工具条：按天 / 整周 + 周次切换 */}
+            <div className="mb-3 flex items-center justify-between gap-2">
+              <div className="glass-thin inline-flex rounded-full p-0.5 text-xs" role="tablist" aria-label="课表显示模式">
+                {(
+                  [
+                    ['day', '按天'],
+                    ['week', '整周'],
+                  ] as const
+                ).map(([m, label]) => (
+                  <button
+                    key={m}
+                    type="button"
+                    role="tab"
+                    aria-selected={activeMode === m}
+                    className="relative rounded-full px-3 py-1.5"
+                    onClick={() => switchMode(m)}
+                  >
+                    {activeMode === m && (
+                      <motion.span
+                        layoutId="timetable-mode"
+                        className="absolute inset-0 rounded-full bg-white/35 shadow-sm"
+                        transition={spring.snappy}
+                      />
+                    )}
+                    <span className={`relative ${activeMode === m ? 'font-semibold' : 'text-fg-muted'}`}>{label}</span>
+                  </button>
+                ))}
+              </div>
+
+              <div className="flex items-center gap-1">
+                <button
+                  type="button"
+                  className="glass-thin grid size-8 place-items-center rounded-full!"
+                  aria-label="上一周"
+                  disabled={shown <= 1}
+                  onClick={() => goWeek(shown - 1)}
+                >
+                  <ChevronLeftIcon size={16} />
                 </button>
-              )}
+                <div className="min-w-[4.25rem] text-center">
+                  <p className="text-xs font-semibold">第 {shown} 周</p>
+                  {currentWeek !== null && shown !== currentWeek && (
+                    <button type="button" className="text-[11px] text-accent" onClick={() => goWeek(currentWeek)}>
+                      回到本周
+                    </button>
+                  )}
+                </div>
+                <button
+                  type="button"
+                  className="glass-thin grid size-8 place-items-center rounded-full!"
+                  aria-label="下一周"
+                  disabled={shown >= semester.totalWeeks}
+                  onClick={() => goWeek(shown + 1)}
+                >
+                  <ChevronRightIcon size={16} />
+                </button>
+              </div>
             </div>
-            <button
-              type="button"
-              className="glass-thin grid size-9 place-items-center rounded-full!"
-              aria-label="下一周"
-              disabled={shown >= semester.totalWeeks}
-              onClick={() => goWeek(shown + 1)}
-            >
-              <ChevronRightIcon size={18} />
-            </button>
-          </div>
-        )}
-      </div>
 
-      {view === 'exam' ? (
+            {activeMode === 'day' ? (
+              <>
+                <WeekStrip
+                  data={data!}
+                  campusId={user?.campusId}
+                  week={shown}
+                  selected={selectedWeekday}
+                  todayStr={todayStr}
+                  onSelect={setWeekday}
+                  onSwipe={(dir) => goWeek(shown + dir)}
+                />
+                <DayList
+                  key={selectedDate}
+                  sessions={sessionsOn(data!, selectedDate, user?.campusId)}
+                  date={selectedDate}
+                  todayStr={todayStr}
+                  now={now}
+                  onOpen={(id) => {
+                    const course = data!.courses.find((c) => c.id === id);
+                    if (course) setDraft({ course });
+                  }}
+                />
+              </>
+            ) : (
+              <WeekGrid
+                semester={semester}
+                courses={data!.courses}
+                shown={shown}
+                todayStr={todayStr}
+                periods={periods}
+                setDraft={setDraft}
+              />
+            )}
+
+            {data!.courses.length === 0 && (
+              <p className="mt-3 text-center text-sm text-fg-muted">点右上角「添加」录入第一门课，或者「导入」教务系统的课表</p>
+            )}
+          </>
+        )
+      ) : activeTab === 'exam' ? (
         <ExamPanel
           exams={exams}
           isLoading={examsQuery.isPending}
@@ -224,44 +356,23 @@ export function TimetablePage() {
           onImport={openExamImport}
           onEdit={(exam) => setExamDraft({ exam })}
         />
-      ) : view === 'day' ? (
-        <>
-          <WeekStrip
-            data={data!}
-            campusId={user?.campusId}
-            week={shown}
-            selected={selectedWeekday}
-            todayStr={todayStr}
-            onSelect={setWeekday}
-            onSwipe={(dir) => goWeek(shown + dir)}
-          />
-          <DayList
-            key={selectedDate}
-            sessions={sessionsOn(data!, selectedDate, user?.campusId)}
-            date={selectedDate}
-            todayStr={todayStr}
-            now={now}
-            onOpen={(id) => {
-              const course = data!.courses.find((c) => c.id === id);
-              if (course) setDraft({ course });
-            }}
-          />
-        </>
+      ) : activeTab === 'scores' ? (
+        <Suspense fallback={<CardSkeleton rows={4} />}>
+          <ScoresContent requestedSub={requestedScoreSub} onSubChange={clearScoreSubParam} />
+        </Suspense>
       ) : (
-        <WeekGrid semester={semester} courses={data!.courses} shown={shown} todayStr={todayStr} periods={periods} setDraft={setDraft} />
+        <Suspense fallback={<CardSkeleton rows={4} />}>
+          <CalendarPanel now={now} />
+        </Suspense>
       )}
 
-      {view !== 'exam' && data!.courses.length === 0 && (
-        <p className="mt-3 text-center text-sm text-fg-muted">点右上角「添加」录入第一门课，或者「导入」教务系统的课表</p>
-      )}
-
-      <CourseEditor draft={draft} semester={semester} onClose={() => setDraft(null)} />
+      {semester && <CourseEditor draft={draft} semester={semester} onClose={() => setDraft(null)} />}
       <ExamEditorSheet draft={examDraft} onClose={() => setExamDraft(null)} />
       <Sheet open={Boolean(shareInfo)} onClose={() => setShareInfo(null)} title="分享本学期课表">
         {shareInfo && (
           <div className="space-y-4 pb-2 text-center">
             <p className="text-sm text-fg-muted">
-              把下面 6 位分享码发给同班或室友，在「课表 → 导入」里输入即可 10 秒复制这 {shareInfo.courseCount} 门课（不含你的个人信息）。
+              把下面 6 位分享码发给同班或室友，在「学业 → 导入」里输入即可 10 秒复制这 {shareInfo.courseCount} 门课（不含你的个人信息）。
             </p>
             <div className="surface-subtle rounded-3xl py-5">
               <p className="font-num text-3xl font-bold tracking-[0.28em] text-accent tabular-nums">{shareInfo.code}</p>
@@ -280,7 +391,7 @@ export function TimetablePage() {
           </div>
         )}
       </Sheet>
-      {importLoaded && (
+      {importLoaded && semester && (
         <Suspense fallback={null}>
           <ImportSheet open={importing} onClose={() => setImporting(false)} semester={semester} courses={data!.courses} />
         </Suspense>
@@ -294,25 +405,56 @@ export function TimetablePage() {
   );
 }
 
-function ViewSwitch({ value, onChange, examCount }: { value: View; onChange: (v: View) => void; examCount: number }) {
-  const options: [View, string][] = [
-    ['day', '按天'],
-    ['week', '整周'],
-    ['exam', '考试'],
+function StudyTabBar({
+  value,
+  onChange,
+  examCount,
+}: {
+  value: StudyTab;
+  onChange: (v: StudyTab) => void;
+  examCount: number;
+}) {
+  const tabs: { id: StudyTab; label: string }[] = [
+    { id: 'timetable', label: '课表' },
+    { id: 'exam', label: '考试' },
+    { id: 'scores', label: '成绩' },
+    { id: 'calendar', label: '校历' },
   ];
   return (
-    <div className="glass-thin flex rounded-full p-1 text-sm" role="tablist" aria-label="课表视图">
-      {options.map(([v, label]) => (
-        <button key={v} type="button" role="tab" aria-selected={value === v} className="relative flex items-center gap-1 rounded-full px-3.5 py-1.5" onClick={() => onChange(v)}>
-          {value === v && <motion.span layoutId="timetable-view" className="absolute inset-0 rounded-full bg-white/35 shadow-sm" transition={spring.snappy} />}
-          <span className={`relative ${value === v ? 'font-semibold' : 'text-fg-muted'}`}>{label}</span>
-          {v === 'exam' && examCount > 0 && (
-            <span className="relative rounded-full bg-accent px-1.5 py-0.2 text-[10px] font-semibold text-accent-fg tabular-nums">
-              {examCount}
-            </span>
-          )}
-        </button>
-      ))}
+    <div className="glass-thin mb-4 grid grid-cols-4 rounded-full p-1" role="tablist" aria-label="学业板块">
+      {tabs.map((item) => {
+        const active = value === item.id;
+        return (
+          <button
+            key={item.id}
+            type="button"
+            role="tab"
+            aria-selected={active}
+            onClick={() => onChange(item.id)}
+            className={`relative flex items-center justify-center gap-1 rounded-full py-2 text-sm transition-colors ${
+              active ? 'font-semibold text-accent-fg' : 'text-fg-muted'
+            }`}
+          >
+            {active && (
+              <motion.span
+                layoutId="study-tab-pill"
+                className="absolute inset-0 rounded-full bg-accent shadow-sm"
+                transition={spring.snappy}
+              />
+            )}
+            <span className="relative">{item.label}</span>
+            {item.id === 'exam' && examCount > 0 && (
+              <span
+                className={`relative rounded-full px-1.5 py-0.2 font-num text-[10px] font-semibold tabular-nums ${
+                  active ? 'bg-white/25 text-accent-fg' : 'bg-accent/15 text-accent'
+                }`}
+              >
+                {examCount}
+              </span>
+            )}
+          </button>
+        );
+      })}
     </div>
   );
 }

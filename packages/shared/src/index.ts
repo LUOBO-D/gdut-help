@@ -1,7 +1,9 @@
 export * from './api.js';
 export * from './app-update.js';
 export * from './auth.js';
+export * from './calendar.js';
 export * from './campus-map.js';
+export * from './campus-services.js';
 export * from './exam.js';
 export * from './exam-import.js';
 export { examImportItemSchema, examImportSchema, examInputSchema } from './exam-schema.js';

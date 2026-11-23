@@ -283,3 +283,71 @@ export async function jwFitnessProbe(): Promise<string | null> {
   }
   return null;
 }
+
+export interface JwEmptyClassroomQuery {
+  semesterCode: string;
+  week: number;
+  /** 1 = 周一 .. 7 = 周日 */
+  weekday: number;
+  /** 节次块编码，如 '0102'、'0304' */
+  periodCode: string;
+  /** 可选校区代码 */
+  campusCode?: string;
+}
+
+/**
+ * 实时查询广工乘方教务系统空教室（kxjscx / jxcdxx / cdjycx）。
+ * 自动尝试常见接口路径，并在需要时探测页面内真实 AJAX action 或提取 HTML 表格。
+ */
+export async function jwEmptyClassroomsPayload(query: JwEmptyClassroomQuery): Promise<string> {
+  const form: Record<string, string> = {
+    xnxqdm: query.semesterCode,
+    zc: String(query.week),
+    xq: String(query.weekday),
+    jcdm: query.periodCode,
+    jcdm2: query.periodCode,
+    xqdm: query.campusCode ?? '',
+    page: '1',
+    rows: '120',
+  };
+
+  const candidates = [
+    '/kxjscx!getDataList.action',
+    '/jxcdxx!getKxjsList.action',
+    '/cdjycx!getKxjsList.action',
+    '/xsjxcdcx!getDataList.action',
+  ];
+
+  for (const path of candidates) {
+    const res = await jwRequest(path, { method: 'POST', data: form });
+    if (res.status >= 400) continue;
+    const json = tryJsonText(res.data);
+    if (json) return json;
+  }
+
+  // 回退读取空教室查询页，自动探测真实 AJAX 地址或服务端渲染表格
+  const pagePaths = ['/kxjscx!kxjscxList.action', '/jxcdxx!kxjsList.action', '/cdjycx!kxjsList.action'];
+  for (const pagePath of pagePaths) {
+    const pageRes = await jwRequest(
+      `${pagePath}?xnxqdm=${encodeURIComponent(query.semesterCode)}&zc=${query.week}&xq=${query.weekday}&jcdm=${encodeURIComponent(query.periodCode)}`,
+    );
+    if (pageRes.status >= 400) continue;
+    const html = typeof pageRes.data === 'string' ? pageRes.data : JSON.stringify(pageRes.data);
+    const pageJson = tryJsonText(html);
+    if (pageJson) return pageJson;
+
+    const actionMatch = /['"](\/?[a-zA-Z0-9_/-]*(?:kxjs|jxcd|cdjy|jsjy)[a-zA-Z0-9_-]*![a-zA-Z0-9_]+\.action)['"]/i.exec(html);
+    if (actionMatch?.[1]) {
+      const discoveredPath = actionMatch[1].startsWith('/') ? actionMatch[1] : `/${actionMatch[1]}`;
+      if (!candidates.includes(discoveredPath)) {
+        const sub = await jwRequest(discoveredPath, { method: 'POST', data: form });
+        const subJson = tryJsonText(sub.data);
+        if (subJson) return subJson;
+      }
+    }
+
+    if (/<tr\b/i.test(html) && /教室|场地|座位/.test(html)) return html;
+  }
+
+  return '{"total":0,"rows":[]}';
+}

@@ -17,11 +17,11 @@ export function AppShell() {
   useAppShortcuts();
   const { pathname } = useLocation();
 
-  // 首屏渲染后空闲预加载其余常用主 Tab 分包，切换课表/吃什么/待办零等待
+  // 首屏渲染后空闲预加载其余常用主 Tab 分包，切换学业/校园/吃什么/待办零等待
   useEffect(() => {
     const preload = () => {
       void import('../features/timetable/TimetablePage');
-      void import('../features/scores/ScoresPage');
+      void import('../features/campus/CampusPage');
       void import('../features/food/FoodPage');
       void import('../features/todo/TodoPage');
     };

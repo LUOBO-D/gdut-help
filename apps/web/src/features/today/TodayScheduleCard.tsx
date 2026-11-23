@@ -153,7 +153,7 @@ export function TodayScheduleCard() {
           )}
         </div>
         <Link
-          to="/timetable"
+          to="/study"
           className="inline-flex shrink-0 items-center gap-0.5 text-xs font-medium text-accent transition-opacity hover:opacity-80"
         >
           课表
@@ -181,7 +181,7 @@ export function TodayScheduleCard() {
           </div>
 
           <div className="mt-1.5 flex items-start justify-between gap-3">
-            <Link to="/timetable" className="min-w-0 flex-1">
+            <Link to="/study" className="min-w-0 flex-1">
               <p className="line-clamp-2 text-[19px] font-bold leading-snug tracking-tight">
                 {spotlight.session.name}
               </p>
@@ -220,7 +220,7 @@ export function TodayScheduleCard() {
           </div>
         </div>
       ) : emptyText ? (
-        <Link to="/timetable" className="mt-3 flex items-center justify-between gap-3 py-1">
+        <Link to="/study" className="mt-3 flex items-center justify-between gap-3 py-1">
           <p className="text-sm text-fg-muted">{emptyText}</p>
           {needsImport && (
             <span className="shrink-0 rounded-full bg-accent/15 px-3 py-1 text-xs font-semibold text-accent">
@@ -259,7 +259,7 @@ export function TodayScheduleCard() {
                       done ? 'opacity-55' : ''
                     }`}
                   >
-                    <Link to="/timetable" className="flex min-w-0 flex-1 items-center gap-3">
+                    <Link to="/study" className="flex min-w-0 flex-1 items-center gap-3">
                       <div className="w-10 shrink-0 text-right font-num tabular-nums">
                         <p className="text-[13px] font-semibold leading-tight">{formatHm(start)}</p>
                         <p className="text-[11px] leading-tight text-fg-muted">{formatHm(end)}</p>
