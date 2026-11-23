@@ -1,38 +1,55 @@
-import { defaultAcademicYear, type CourseGrade } from '@gduthelp/shared';
+import {
+  DEFAULT_CREDIT_PLAN,
+  defaultAcademicYear,
+  defaultSemesterCode,
+  type CourseGrade,
+} from '@gduthelp/shared';
 import { useQueryClient } from '@tanstack/react-query';
 import { motion } from 'motion/react';
 import { lazy, Suspense, useCallback, useEffect, useState } from 'react';
 import { Button } from '../../components/Button';
 import { PlusIcon } from '../../components/icons';
 import { isNative } from '../../lib/platform';
-import { useCurrentFitness, useGrades } from '../../lib/queries';
+import { useCreditPlan, useCurrentFitness, useGrades, useSecondClassSummary } from '../../lib/queries';
 import {
   getAutoSyncEnabled,
   setAutoSyncEnabled,
   shouldAutoSyncFitness,
   shouldAutoSyncGrades,
+  syncCreditAuditFromSchool,
   syncCurrentFitnessFromSchool,
   syncGradesFromSchool,
+  syncSecondClassFromSchool,
 } from '../../lib/scores-sync';
 import { toast } from '../../lib/toast-store';
 import { spring } from '../../motion/presets';
+import { CreditPlanEditorSheet } from './CreditPlanEditorSheet';
+import { CreditProgressPanel } from './CreditProgressPanel';
 import { CurrentFitnessEditorSheet } from './CurrentFitnessEditorSheet';
 import { CurrentFitnessPanel } from './CurrentFitnessPanel';
 import { GpaPanel } from './GpaPanel';
 import { GradeEditorSheet, type GradeDraft } from './GradeEditorSheet';
+import {
+  SecondClassEditorSheet,
+  SecondClassImportSheet,
+  type SecondClassDraft,
+} from './SecondClassEditorSheet';
+import { SecondClassPanel } from './SecondClassPanel';
 
 const GradeImportSheet = lazy(() =>
   import('./GradeImportSheet').then((m) => ({ default: m.GradeImportSheet })),
 );
 
-export type ScoresSubTab = 'gpa' | 'fitness';
+export type ScoresSubTab = 'gpa' | 'credits' | 'secondClass' | 'fitness';
 const TAB_STORAGE_KEY = 'gduthelp-scores-tab';
 const EMPTY_GRADES: CourseGrade[] = [];
 
 function readSavedSubTab(): ScoresSubTab {
   try {
     const saved = localStorage.getItem(TAB_STORAGE_KEY);
-    if (saved === 'fitness' || saved === 'gpa') return saved;
+    if (saved === 'gpa' || saved === 'credits' || saved === 'secondClass' || saved === 'fitness') {
+      return saved;
+    }
   } catch {
     // ignore
   }
@@ -40,15 +57,18 @@ function readSavedSubTab(): ScoresSubTab {
 }
 
 interface ScoresContentProps {
-  /** 从外部深链指定初始子面板（例如 /study?tab=scores&sub=fitness） */
+  /** 从外部深链指定初始子面板（例如 /study?tab=scores&sub=credits） */
   requestedSub?: ScoresSubTab | null;
   /** 切换子面板后用于清理 URL 上的 sub 参数 */
   onSubChange?: (next: ScoresSubTab) => void;
 }
 
 /**
- * 成绩核心内容区（广工 5.0 绩点 + 当前学年体测直查 + 自动静默更新）。
- * 直接内嵌于「学业 → 成绩」标签下，避免重复页面头和多余导航层级。
+ * 成绩与学业进度统一内容区（位于「学业 → 成绩」下）：
+ * - 绩点：广工 5.0 制 GPA 统计与自动同步
+ * - 学分：毕业学分五大模块修读进度与培养方案核验
+ * - 二课：当前学期 & 当前学年第二课堂时长查询
+ * - 体测：当前学年体测直查与国家标准算分
  */
 export function ScoresContent({ requestedSub = null, onSubChange }: ScoresContentProps) {
   const qc = useQueryClient();
@@ -57,20 +77,30 @@ export function ScoresContent({ requestedSub = null, onSubChange }: ScoresConten
   const [autoSync, setAutoSync] = useState<boolean>(() => getAutoSyncEnabled());
 
   const academicYear = defaultAcademicYear();
+  const semesterCode = defaultSemesterCode();
   const gradesQuery = useGrades();
+  const creditPlanQuery = useCreditPlan();
+  const secondClassQuery = useSecondClassSummary(academicYear, semesterCode);
   const fitnessQuery = useCurrentFitness(academicYear);
 
   const grades = gradesQuery.data?.grades ?? EMPTY_GRADES;
+  const creditPlan = creditPlanQuery.data ?? DEFAULT_CREDIT_PLAN;
   const currentFitness = fitnessQuery.data?.record ?? null;
 
   const [gradeSyncing, setGradeSyncing] = useState(false);
   const [gradeHint, setGradeHint] = useState<string | null>(null);
+  const [creditSyncing, setCreditSyncing] = useState(false);
+  const [scSyncing, setScSyncing] = useState(false);
+  const [scHint, setScHint] = useState<string | null>(null);
   const [fitnessSyncing, setFitnessSyncing] = useState(false);
   const [fitnessHint, setFitnessHint] = useState<string | null>(null);
 
   const [gradeDraft, setGradeDraft] = useState<GradeDraft | null>(null);
   const [gradeImportOpen, setGradeImportOpen] = useState(false);
   const [gradeImportLoaded, setGradeImportLoaded] = useState(false);
+  const [creditPlanOpen, setCreditPlanOpen] = useState(false);
+  const [scDraft, setScDraft] = useState<SecondClassDraft | null>(null);
+  const [scImportOpen, setScImportOpen] = useState(false);
   const [fitnessEditOpen, setFitnessEditOpen] = useState(false);
 
   const switchTab = (next: ScoresSubTab) => {
@@ -114,6 +144,39 @@ export function ScoresContent({ requestedSub = null, onSubChange }: ScoresConten
     [qc],
   );
 
+  const runCreditSync = useCallback(async () => {
+    setCreditSyncing(true);
+    const outcome = await syncCreditAuditFromSchool({
+      interactive: true,
+      queryClient: qc,
+      currentPlan: creditPlan,
+    });
+    setCreditSyncing(false);
+    if (outcome.status === 'synced') {
+      toast.success(outcome.message);
+    } else if (outcome.status === 'error') {
+      toast.error(outcome.message);
+    } else if (outcome.status === 'empty' || outcome.status === 'login-required') {
+      toast.info(outcome.message);
+    }
+  }, [qc, creditPlan]);
+
+  const runSecondClassSync = useCallback(async () => {
+    setScSyncing(true);
+    setScHint(null);
+    const outcome = await syncSecondClassFromSchool({ interactive: true, queryClient: qc });
+    setScSyncing(false);
+    if (outcome.status === 'synced') {
+      toast.success(outcome.message);
+    } else if (outcome.status === 'empty' || outcome.status === 'login-required') {
+      setScHint(outcome.message);
+      toast.info(outcome.message);
+    } else if (outcome.status === 'error') {
+      setScHint(outcome.message);
+      toast.error(outcome.message);
+    }
+  }, [qc]);
+
   const runFitnessSync = useCallback(
     async (interactive: boolean) => {
       setFitnessSyncing(true);
@@ -145,12 +208,12 @@ export function ScoresContent({ requestedSub = null, onSubChange }: ScoresConten
     [qc, academicYear, currentFitness?.gender, currentFitness?.gradeYear],
   );
 
-  // 安卓端自动静默刷新：进入「成绩」视图或切回前台且超过冷却时间，自动后台同步当前面板
+  // 安卓端自动静默刷新：进入成绩视图或切回前台且超过冷却时间，自动后台同步当前面板
   useEffect(() => {
     if (!isNative || !autoSync) return;
 
     const trigger = () => {
-      if (tab === 'gpa' && shouldAutoSyncGrades()) {
+      if ((tab === 'gpa' || tab === 'credits') && shouldAutoSyncGrades()) {
         void runGradeSync(false);
       } else if (tab === 'fitness' && shouldAutoSyncFitness()) {
         void runFitnessSync(false);
@@ -173,12 +236,14 @@ export function ScoresContent({ requestedSub = null, onSubChange }: ScoresConten
 
   return (
     <div className="space-y-3.5">
-      {/* 子功能工具条：绩点 / 体测切换 + 快捷操作 */}
-      <div className="flex flex-wrap items-center justify-between gap-2.5">
-        <div className="glass-thin inline-flex rounded-full p-1" role="tablist" aria-label="成绩子视图">
+      {/* 子功能工具条：绩点 / 学分 / 二课 / 体测四段切换 + 快捷操作 */}
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="glass-thin inline-flex rounded-full p-1" role="tablist" aria-label="成绩与进度视图">
           {(
             [
               { id: 'gpa', label: '绩点' },
+              { id: 'credits', label: '学分' },
+              { id: 'secondClass', label: '二课' },
               { id: 'fitness', label: '体测' },
             ] as const
           ).map((item) => {
@@ -190,7 +255,7 @@ export function ScoresContent({ requestedSub = null, onSubChange }: ScoresConten
                 role="tab"
                 aria-selected={active}
                 onClick={() => switchTab(item.id)}
-                className={`relative rounded-full px-3.5 py-1 text-xs font-medium transition-colors ${
+                className={`relative rounded-full px-3 py-1 text-xs font-medium transition-colors ${
                   active ? 'text-accent-fg' : 'text-fg-muted'
                 }`}
               >
@@ -208,7 +273,7 @@ export function ScoresContent({ requestedSub = null, onSubChange }: ScoresConten
         </div>
 
         <div className="flex items-center gap-1.5">
-          {isNative && (
+          {isNative && (tab === 'gpa' || tab === 'fitness') && (
             <button
               type="button"
               onClick={toggleAutoSync}
@@ -219,7 +284,7 @@ export function ScoresContent({ requestedSub = null, onSubChange }: ScoresConten
                 className={`size-1.5 rounded-full ${autoSync ? 'bg-emerald-500' : 'bg-current/30'}`}
                 aria-hidden
               />
-              <span>{autoSync ? '自动更新' : '手动刷新'}</span>
+              <span>{autoSync ? '自动' : '手动'}</span>
             </button>
           )}
 
@@ -239,6 +304,15 @@ export function ScoresContent({ requestedSub = null, onSubChange }: ScoresConten
                 添课
               </Button>
             </>
+          ) : tab === 'credits' ? (
+            <Button variant="ghost" className="h-8 px-2.5 text-xs" onClick={() => setCreditPlanOpen(true)}>
+              调目标
+            </Button>
+          ) : tab === 'secondClass' ? (
+            <Button className="h-8 gap-1 px-2.5 text-xs" onClick={() => setScDraft({})}>
+              <PlusIcon size={14} />
+              记活动
+            </Button>
           ) : (
             <>
               {isNative && (
@@ -271,6 +345,28 @@ export function ScoresContent({ requestedSub = null, onSubChange }: ScoresConten
           onImport={openGradeImport}
           onEdit={(grade) => setGradeDraft({ grade })}
         />
+      ) : tab === 'credits' ? (
+        <CreditProgressPanel
+          grades={grades}
+          plan={creditPlanQuery.data}
+          syncedAt={gradesQuery.data?.syncedAt ?? null}
+          isLoading={gradesQuery.isPending || creditPlanQuery.isPending}
+          syncing={creditSyncing}
+          onSync={() => void runCreditSync()}
+          onImportGrades={openGradeImport}
+          onEditPlan={() => setCreditPlanOpen(true)}
+        />
+      ) : tab === 'secondClass' ? (
+        <SecondClassPanel
+          summary={secondClassQuery.data}
+          isLoading={secondClassQuery.isPending}
+          syncing={scSyncing}
+          syncHint={scHint}
+          onSync={() => void runSecondClassSync()}
+          onAdd={(draft) => setScDraft(draft ?? {})}
+          onOpenImport={() => setScImportOpen(true)}
+          onEdit={(record) => setScDraft({ record })}
+        />
       ) : (
         <CurrentFitnessPanel
           academicYear={academicYear}
@@ -294,6 +390,19 @@ export function ScoresContent({ requestedSub = null, onSubChange }: ScoresConten
           />
         </Suspense>
       )}
+      <CreditPlanEditorSheet open={creditPlanOpen} plan={creditPlan} onClose={() => setCreditPlanOpen(false)} />
+      <SecondClassEditorSheet
+        draft={scDraft}
+        defaultSemesterCode={semesterCode}
+        onClose={() => setScDraft(null)}
+      />
+      <SecondClassImportSheet
+        open={scImportOpen}
+        semesterTarget={secondClassQuery.data?.semesterTargetHours ?? 12}
+        yearTarget={secondClassQuery.data?.yearTargetHours ?? 24}
+        defaultSemesterCode={semesterCode}
+        onClose={() => setScImportOpen(false)}
+      />
       <CurrentFitnessEditorSheet
         open={fitnessEditOpen}
         academicYear={academicYear}

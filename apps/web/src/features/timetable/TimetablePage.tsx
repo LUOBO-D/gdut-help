@@ -41,9 +41,10 @@ import { WeekGrid } from './WeekGrid';
 const ImportSheet = lazy(() => import('./ImportSheet').then((m) => ({ default: m.ImportSheet })));
 const ExamImportSheet = lazy(() => import('./ExamImportSheet').then((m) => ({ default: m.ExamImportSheet })));
 const ScoresContent = lazy(() => import('../scores/ScoresContent').then((m) => ({ default: m.ScoresContent })));
+const CourseReviewPanel = lazy(() => import('../study/CourseReviewPanel').then((m) => ({ default: m.CourseReviewPanel })));
 const CalendarPanel = lazy(() => import('../study/CalendarPanel').then((m) => ({ default: m.CalendarPanel })));
 
-type StudyTab = 'timetable' | 'exam' | 'scores' | 'calendar';
+type StudyTab = 'timetable' | 'exam' | 'scores' | 'reviews' | 'calendar';
 type TimetableMode = 'day' | 'week';
 
 const MODE_KEY = 'gduthelp-timetable-view';
@@ -51,7 +52,9 @@ const EMPTY_EXAMS: Exam[] = [];
 
 function parseStudyTab(params: URLSearchParams): StudyTab | null {
   const tab = params.get('tab');
-  if (tab === 'timetable' || tab === 'exam' || tab === 'scores' || tab === 'calendar') return tab;
+  if (tab === 'timetable' || tab === 'exam' || tab === 'scores' || tab === 'reviews' || tab === 'calendar') {
+    return tab;
+  }
   const legacyView = params.get('view');
   if (legacyView === 'exam') return 'exam';
   if (legacyView === 'day' || legacyView === 'week') return 'timetable';
@@ -59,7 +62,7 @@ function parseStudyTab(params: URLSearchParams): StudyTab | null {
 }
 
 function parseScoreSub(raw: string | null): ScoresSubTab | null {
-  if (raw === 'gpa' || raw === 'fitness') return raw;
+  if (raw === 'gpa' || raw === 'credits' || raw === 'secondClass' || raw === 'fitness') return raw;
   return null;
 }
 
@@ -192,8 +195,10 @@ export function TimetablePage() {
           ? `待考 ${upcomingExamCount} 场 · 点击考场可一键 3D 导航`
           : '考试日程与考场 3D 导航'
         : activeTab === 'scores'
-          ? '广工 5.0 制绩点与当前学年体测 · 支持自动更新'
-          : '广工官方教学日历 · 周次进度与放假倒计时';
+          ? '绩点 · 学分进度 · 第二课堂时长 · 当前学年体测'
+          : activeTab === 'reviews'
+            ? '公共选修课 & 体育选课评价共享库 · 给分/点名一目了然'
+            : '广工官方教学日历 · 周次进度与放假倒计时';
 
   const headerAction =
     activeTab === 'timetable' && semester ? (
@@ -360,6 +365,10 @@ export function TimetablePage() {
         <Suspense fallback={<CardSkeleton rows={4} />}>
           <ScoresContent requestedSub={requestedScoreSub} onSubChange={clearScoreSubParam} />
         </Suspense>
+      ) : activeTab === 'reviews' ? (
+        <Suspense fallback={<CardSkeleton rows={4} />}>
+          <CourseReviewPanel />
+        </Suspense>
       ) : (
         <Suspense fallback={<CardSkeleton rows={4} />}>
           <CalendarPanel now={now} />
@@ -418,10 +427,11 @@ function StudyTabBar({
     { id: 'timetable', label: '课表' },
     { id: 'exam', label: '考试' },
     { id: 'scores', label: '成绩' },
+    { id: 'reviews', label: '选课' },
     { id: 'calendar', label: '校历' },
   ];
   return (
-    <div className="glass-thin mb-4 grid grid-cols-4 rounded-full p-1" role="tablist" aria-label="学业板块">
+    <div className="glass-thin mb-4 grid grid-cols-5 rounded-full p-1" role="tablist" aria-label="学业板块">
       {tabs.map((item) => {
         const active = value === item.id;
         return (
@@ -431,7 +441,7 @@ function StudyTabBar({
             role="tab"
             aria-selected={active}
             onClick={() => onChange(item.id)}
-            className={`relative flex items-center justify-center gap-1 rounded-full py-2 text-sm transition-colors ${
+            className={`relative flex items-center justify-center gap-0.5 rounded-full py-2 text-[13px] transition-colors sm:text-sm ${
               active ? 'font-semibold text-accent-fg' : 'text-fg-muted'
             }`}
           >

@@ -1,5 +1,6 @@
 import { randomBytes } from 'node:crypto';
-import { HttpStatus, Injectable } from '@nestjs/common';
+import { HttpStatus, Injectable, Optional } from '@nestjs/common';
+import { CourseReviewService } from '../course-review/course-review.service.js';
 import {
   alignToMonday,
   COURSE_COLORS,
@@ -67,7 +68,10 @@ const slotRows = (data: CourseData) =>
 
 @Injectable()
 export class TimetableService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    @Optional() private readonly courseReviews?: CourseReviewService,
+  ) {}
 
   async currentSemester(): Promise<Semester | null> {
     const s = await this.prisma.semester.findFirst({ where: { isCurrent: true } });
@@ -168,7 +172,7 @@ export class TimetableService {
       if (keys.has(c.importKey)) throw new AppException(ErrorCode.VALIDATION_FAILED, `课程重复：${c.name}`);
       keys.add(c.importKey);
     }
-    return this.prisma.$transaction(async (tx) => {
+    const result = await this.prisma.$transaction(async (tx) => {
       const rows = await tx.course.findMany({ where: { userId, semesterId: semester.id }, include: { slots: true } });
       const existing = rows.map(toCourse);
       const diff = diffImport(existing, data.courses);
@@ -211,6 +215,20 @@ export class TimetableService {
       if (removed.length) await tx.course.deleteMany({ where: { id: { in: removed.map((c) => c.id) }, userId } });
       return { added: diff.added.length, changed: diff.changed.length, removed: removed.length, unchanged: diff.unchanged };
     });
+
+    // 脱敏扩充全校公选/体育课目录（仅提取课程名与教师名，不含任何个人隐私）
+    if (this.courseReviews && data.courses.length > 0) {
+      const user = await this.prisma.user.findUnique({ where: { id: userId }, select: { campusId: true } });
+      void this.courseReviews.absorbElectivesFromStudentSync(
+        data.courses.map((c) => ({
+          courseName: c.name,
+          teacherName: c.teacher,
+          campusId: user?.campusId ?? null,
+        })),
+      );
+    }
+
+    return result;
   }
 
   async remove(userId: string, id: string): Promise<void> {

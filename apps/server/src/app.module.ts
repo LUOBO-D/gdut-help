@@ -4,6 +4,7 @@ import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { AppUpdateModule } from './app-update/app-update.module.js';
 import { AuthModule } from './auth/auth.module.js';
 import { AppConfigModule } from './config/config.module.js';
+import { CourseReviewModule } from './course-review/course-review.module.js';
 import { ExamModule } from './exam/exam.module.js';
 import { FitnessModule } from './fitness/fitness.module.js';
 import { GradeModule } from './grade/grade.module.js';
@@ -14,6 +15,7 @@ import { PrismaModule } from './prisma/prisma.module.js';
 import { NotifyModule } from './notify/notify.module.js';
 import { RecommendModule } from './recommend/recommend.module.js';
 import { ReviewModule } from './review/review.module.js';
+import { SecondClassModule } from './second-class/second-class.module.js';
 import { TimetableModule } from './timetable/timetable.module.js';
 import { TodoModule } from './todo/todo.module.js';
 import { UsersModule } from './users/users.module.js';
@@ -34,6 +36,8 @@ import { WeatherModule } from './weather/weather.module.js';
     ExamModule,
     FitnessModule,
     GradeModule,
+    SecondClassModule,
+    CourseReviewModule,
     NotifyModule,
     TodoModule,
     MerchantModule,

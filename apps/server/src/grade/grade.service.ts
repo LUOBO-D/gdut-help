@@ -2,23 +2,62 @@ import { HttpStatus, Injectable } from '@nestjs/common';
 import {
   convertGdutScore,
   courseGradeInputSchema,
+  creditPlanInputSchema,
+  DEFAULT_CREDIT_PLAN,
   diffGradeSync,
   ErrorCode,
   formatSemesterName,
   gradeSyncSchema,
   normalizeSemesterCode,
   type CourseGrade,
+  type CreditOfficialModule,
+  type CreditPlan,
   type GradeData,
   type GradeSyncResult,
   type ImportedCourseGrade,
 } from '@gduthelp/shared';
 import type { z } from 'zod';
 import { AppException } from '../common/app.exception.js';
-import type { CourseGrade as CourseGradeRow } from '../generated/prisma/client.js';
+import type { CourseGrade as CourseGradeRow, Prisma, UserCreditPlan } from '../generated/prisma/client.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 
 type CourseGradeInputData = z.output<typeof courseGradeInputSchema>;
 type GradeSyncData = z.output<typeof gradeSyncSchema>;
+type CreditPlanInputData = z.output<typeof creditPlanInputSchema>;
+
+function parseStoredOfficialModules(raw: Prisma.JsonValue | null | undefined): CreditOfficialModule[] {
+  if (!Array.isArray(raw)) return [];
+  const out: CreditOfficialModule[] = [];
+  for (const item of raw) {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) continue;
+    const rec = item as Record<string, unknown>;
+    if (typeof rec.name === 'string' && typeof rec.required === 'number' && typeof rec.earned === 'number') {
+      out.push({
+        name: rec.name,
+        required: rec.required,
+        earned: rec.earned,
+        missing: typeof rec.missing === 'number' ? rec.missing : Math.max(0, Math.round((rec.required - rec.earned) * 10) / 10),
+      });
+    }
+  }
+  return out;
+}
+
+const toCreditPlan = (row: UserCreditPlan | null): CreditPlan => {
+  if (!row) return { ...DEFAULT_CREDIT_PLAN };
+  return {
+    totalTarget: row.totalTarget,
+    generalRequiredTarget: row.generalRequiredTarget,
+    majorRequiredTarget: row.majorRequiredTarget,
+    majorElectiveTarget: row.majorElectiveTarget,
+    generalElectiveTarget: row.generalElectiveTarget,
+    practiceTarget: row.practiceTarget,
+    majorName: row.majorName,
+    officialModules: parseStoredOfficialModules(row.officialModules),
+    officialSyncedAt: row.officialSyncedAt?.toISOString() ?? null,
+    updatedAt: row.updatedAt.toISOString(),
+  };
+};
 
 const toCourseGrade = (r: CourseGradeRow): CourseGrade => ({
   id: r.id,
@@ -172,6 +211,45 @@ export class GradeService {
         syncedAt: new Date().toISOString(),
       };
     });
+  }
+
+  async getCreditPlan(userId: string): Promise<CreditPlan> {
+    const row = await this.prisma.userCreditPlan.findUnique({ where: { userId } });
+    return toCreditPlan(row);
+  }
+
+  async upsertCreditPlan(userId: string, data: CreditPlanInputData): Promise<CreditPlan> {
+    const round1 = (n: number) => Math.round(n * 10) / 10;
+    const base = {
+      totalTarget: round1(data.totalTarget),
+      generalRequiredTarget: round1(data.generalRequiredTarget),
+      majorRequiredTarget: round1(data.majorRequiredTarget),
+      majorElectiveTarget: round1(data.majorElectiveTarget),
+      generalElectiveTarget: round1(data.generalElectiveTarget),
+      practiceTarget: round1(data.practiceTarget),
+      majorName: data.majorName ?? null,
+    };
+    const officialPatch =
+      data.officialModules !== undefined
+        ? {
+            officialModules: data.officialModules as unknown as Prisma.InputJsonValue,
+            officialSyncedAt: data.officialModules.length > 0 ? new Date() : null,
+          }
+        : {};
+
+    const row = await this.prisma.userCreditPlan.upsert({
+      where: { userId },
+      create: {
+        userId,
+        ...base,
+        ...officialPatch,
+      },
+      update: {
+        ...base,
+        ...officialPatch,
+      },
+    });
+    return toCreditPlan(row);
   }
 
   private async owned(userId: string, id: string): Promise<void> {

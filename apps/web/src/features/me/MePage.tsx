@@ -31,6 +31,7 @@ import { pressable, spring } from '../../motion/presets';
 import { PreferencesSheet } from '../food/PreferencesSheet';
 import { CampusPicker } from './CampusPicker';
 import { DisplaySettings } from './DisplaySettings';
+import { GdutAuthCard } from './GdutAuthCard';
 import { ReminderSettings } from './ReminderSettings';
 import { SemesterSettings } from './SemesterSettings';
 import { useUpdateProfile } from './useUpdateProfile';
@@ -84,6 +85,7 @@ export function MePage() {
 
         <section className="space-y-3">
           <h2 className="px-1 text-xs font-semibold tracking-wide text-fg-muted">学业与偏好</h2>
+          <GdutAuthCard />
           <GlassCard className="p-5">
             <Link to="/study?tab=scores" className="flex w-full items-center justify-between gap-3 text-left">
               <div className="min-w-0">

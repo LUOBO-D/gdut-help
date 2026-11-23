@@ -4,6 +4,38 @@ export * from './auth.js';
 export * from './calendar.js';
 export * from './campus-map.js';
 export * from './campus-services.js';
+export * from './course-review.js';
+export {
+  catalogImportItemSchema,
+  catalogImportSchema,
+  courseListQuerySchema,
+  courseReviewInputSchema,
+  createCourseAndReviewSchema,
+} from './course-review-schema.js';
+export type {
+  CatalogImportItem,
+  CatalogImportRequest,
+  CourseListQuery,
+  CourseReviewInput,
+  CreateCourseAndReviewInput,
+} from './course-review-schema.js';
+export * from './gdut-elective-catalog.js';
+export * from './credit.js';
+export { creditOfficialModuleSchema, creditPlanInputSchema } from './credit-schema.js';
+export type { CreditPlanInput } from './credit-schema.js';
+export * from './second-class.js';
+export {
+  secondClassRecordInputSchema,
+  secondClassSyncItemSchema,
+  secondClassSyncSchema,
+  secondClassTargetsSchema,
+} from './second-class-schema.js';
+export type {
+  SecondClassRecordInput,
+  SecondClassSyncRequest,
+  SecondClassSyncResult,
+  SecondClassTargetsInput,
+} from './second-class-schema.js';
 export * from './exam.js';
 export * from './exam-import.js';
 export { examImportItemSchema, examImportSchema, examInputSchema } from './exam-schema.js';

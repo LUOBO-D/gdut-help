@@ -1,113 +1,35 @@
 /**
- * 教务系统（jxfw.gdut.edu.cn）登录与请求。只在安卓 App 里使用。
+ * 教务系统（jxfw.gdut.edu.cn）业务请求集合。只在安卓 App 里使用。
  *
- * 用户在应用内浏览器里打开学校统一认证的登录页，自己完成登录（密码、扫码、滑块都由学校页面处理），
- * 我们的代码接触不到密码。应用内浏览器和 App 共用 WebView 的 Cookie（isIsolated: false），
- * 登录完成后，用 CapacitorHttp 在手机上直接请求教务系统：原生请求不受跨域限制，
- * 并且读写的就是同一份 Cookie。数据只在手机上解析，提交给我们服务器的只有整理好的课程。
+ * 底层会话、CAS 静默续期、Cookie 持久化与统一登录全部委托给 gdut-auth.ts 统一认证网关，
+ * 保证在「我的 → 广工统一认证」登录一次即可在课表、考试、成绩、学分、空教室与公选课目录全局复用。
  */
-import { CapacitorHttp, type HttpResponse } from '@capacitor/core';
-import { DefaultWebViewOptions, InAppBrowser } from '@capacitor/inappbrowser';
+import type { HttpResponse } from '@capacitor/core';
+import {
+  connectGdutAuth,
+  GdutAuthRequired,
+  gdutRequest,
+  JW_ORIGIN,
+  type ConnectGdutOptions,
+} from './gdut-auth';
 
-export const JW_ORIGIN = 'https://jxfw.gdut.edu.cn';
-const LOGIN_URL = `https://authserver.gdut.edu.cn/authserver/login?service=${encodeURIComponent(`${JW_ORIGIN}/new/ssoLogin`)}`;
+export { JW_ORIGIN };
 
-/** 应用内浏览器只允许打开这些域名：学校的页面，以及统一认证里 QQ / 微信登录会跳转的页面 */
-const ALLOWED_HOSTS = [/(^|\.)gdut\.edu\.cn$/, /(^|\.)qq\.com$/];
-const allowed = (url: string) => {
-  try {
-    const { protocol, hostname } = new URL(url);
-    return protocol === 'https:' && ALLOWED_HOSTS.some((re) => re.test(hostname));
-  } catch {
-    return false;
-  }
-};
-/** 到了教务系统自己的页面（不再是统一认证），说明登录成功 */
-const isLoggedInPage = (url: string) => url.startsWith(JW_ORIGIN) && !/\/(login|ssoLogin)\b/.test(url);
+/** 保持兼容原有导出名：与 GdutAuthRequired 指向同一错误类 */
+export const JwLoginRequired = GdutAuthRequired;
 
-export interface JwLoginOptions {
-  /** 登录成功后不自动关闭（调试时用来手动打开课表页） */
-  keepOpen?: boolean;
+export type JwLoginOptions = ConnectGdutOptions;
+
+/** 打开广工统一认证页（与「我的 → 广工统一认证」共用同一网关） */
+export function loginToJw(options: JwLoginOptions = {}): Promise<boolean> {
+  return connectGdutAuth({ ...options, targetOrigin: JW_ORIGIN });
 }
 
-/**
- * 打开统一认证登录页，等用户登录。登录成功返回 true；用户直接关掉返回 false。
- * 打开了不在白名单里的网站时自动关闭。
- */
-export async function loginToJw({ keepOpen = false }: JwLoginOptions = {}): Promise<boolean> {
-  let loggedIn = false;
-  return new Promise<boolean>((resolve, reject) => {
-    const handles: Promise<{ remove: () => Promise<void> }>[] = [];
-    const finish = () => {
-      for (const h of handles) void h.then((x) => x.remove());
-      resolve(loggedIn);
-    };
-    handles.push(
-      InAppBrowser.addListener('browserPageNavigationCompleted', ({ url = '' }) => {
-        if (!url) return;
-        if (!allowed(url)) {
-          void InAppBrowser.close();
-          return;
-        }
-        if (isLoggedInPage(url)) {
-          loggedIn = true;
-          if (!keepOpen) void InAppBrowser.close();
-        }
-      }),
-      InAppBrowser.addListener('browserClosed', finish),
-    );
-    InAppBrowser.openInWebView({
-      url: LOGIN_URL,
-      options: {
-        ...DefaultWebViewOptions,
-        showURL: true,
-        showToolbar: true,
-        showNavigationButtons: true,
-        closeButtonText: '关闭',
-        android: { ...DefaultWebViewOptions.android, isIsolated: false, hardwareBack: true },
-      },
-    }).catch((err: unknown) => {
-      for (const h of handles) void h.then((x) => x.remove());
-      reject(err instanceof Error ? err : new Error(String(err)));
-    });
-  });
-}
-
-/** 请求教务系统。登录状态失效时，教务系统会跳回统一认证页，这里抛出 JwLoginRequired */
-export class JwLoginRequired extends Error {
-  constructor() {
-    super('教务系统登录已过期，请重新登录');
-    this.name = 'JwLoginRequired';
-  }
-}
-
-/**
- * 登录失效时，教务系统不返回 401，而是返回登录页（状态码 200）：
- * 可能是统一认证页，也可能是教务系统自己的登录页（id="login_form"，带「/new/ssoLogin」链接）。
- * 注意：App 每次启动时 Capacitor 会清掉会话 Cookie，教务系统的登录状态也随之失效。
- */
-function looksLikeLoginPage(url: string | undefined, body: string): boolean {
-  if (url?.includes('authserver.gdut.edu.cn')) return true;
-  const head = body.slice(0, 6000);
-  return /authserver\/login|id=["']login_form["']/.test(head);
-}
-
-export async function jwRequest(path: string, init: { method?: 'GET' | 'POST'; data?: Record<string, string> } = {}): Promise<HttpResponse> {
-  const { method = 'GET', data } = init;
-  const res = await CapacitorHttp.request({
-    url: `${JW_ORIGIN}${path}`,
-    method,
-    headers: {
-      Accept: 'application/json, text/javascript, */*; q=0.01',
-      'X-Requested-With': 'XMLHttpRequest',
-      ...(data ? { 'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8' } : {}),
-    },
-    data: data ? new URLSearchParams(data).toString() : undefined,
-    responseType: 'text',
-  });
-  const body = typeof res.data === 'string' ? res.data : JSON.stringify(res.data);
-  if (looksLikeLoginPage(res.url, body)) throw new JwLoginRequired();
-  return res;
+export function jwRequest(
+  path: string,
+  init: { method?: 'GET' | 'POST'; data?: Record<string, string> } = {},
+): Promise<HttpResponse> {
+  return gdutRequest(JW_ORIGIN, path, init);
 }
 
 export interface JwSemester {
@@ -121,8 +43,7 @@ export async function jwSemesters(): Promise<{ list: JwSemester[]; current: JwSe
   const res = await jwRequest('/xsgrkbcx!getXsgrbkList.action');
   const html = String(res.data).replace(/\s+/g, ' ');
   const select = /<select[^>]*id=['"]xnxqdm['"][^>]*>(.*?)<\/select>/i.exec(html)?.[1];
-  // 不是课表页（多半是登录状态失效后的其他页面），按需要重新登录处理
-  if (select === undefined) throw new JwLoginRequired();
+  if (select === undefined) throw new GdutAuthRequired();
   const list: JwSemester[] = [];
   let current: JwSemester | null = null;
   for (const m of select.matchAll(/<option([^>]*)>([^<]*)/g)) {
@@ -142,7 +63,7 @@ export async function jwTimetableJson(semesterCode: string): Promise<string> {
   try {
     JSON.parse(text);
   } catch {
-    throw new JwLoginRequired();
+    throw new GdutAuthRequired();
   }
   return text;
 }
@@ -171,11 +92,7 @@ function tryJsonText(raw: unknown): string | null {
   }
 }
 
-/**
- * 读取教务系统考试安排（乘方教务 xsksap）。
- * 1. 优先请求 /xsksap!getDataList.action（POST xnxqdm + 分页参数），返回 `{ total, rows: [...] }`；
- * 2. 若页面接口路径有定制差异，回退读取 /xsksap!xsksapList.action 探测真实 action 或直接提取表格 HTML。
- */
+/** 读取教务系统考试安排（乘方教务 xsksap） */
 export async function jwExamsPayload(semesterCode: string): Promise<string> {
   const form = {
     xnxqdm: semesterCode,
@@ -189,7 +106,6 @@ export async function jwExamsPayload(semesterCode: string): Promise<string> {
   const primaryJson = tryJsonText(primary.data);
   if (primaryJson) return primaryJson;
 
-  // 回退读取考试安排列表页，探测页面内真实 AJAX 地址或服务端渲染表格
   const pageRes = await jwRequest(`/xsksap!xsksapList.action?xnxqdm=${encodeURIComponent(semesterCode)}`);
   const html = typeof pageRes.data === 'string' ? pageRes.data : JSON.stringify(pageRes.data);
   const pageJson = tryJsonText(html);
@@ -209,11 +125,7 @@ export async function jwExamsPayload(semesterCode: string): Promise<string> {
   return '{"total":0,"rows":[]}';
 }
 
-/**
- * 读取教务系统全部（或指定学期）课程成绩与绩点（乘方教务 xskccjxx）。
- * 1. 优先 POST /xskccjxx!getDataList.action（自动处理 >200 条分页）；
- * 2. 若路径有定制差异，回退读取 /xskccjxx!xskccjList.action 自动探测真实 action 或直接提取表格 HTML。
- */
+/** 读取教务系统全部（或指定学期）课程成绩与绩点（乘方教务 xskccjxx） */
 export async function jwGradesPayload(semesterCode = ''): Promise<string> {
   const buildForm = (page: number) => ({
     xnxqdm: semesterCode,
@@ -266,9 +178,7 @@ export async function jwGradesPayload(semesterCode = ''): Promise<string> {
   return '{"total":0,"rows":[]}';
 }
 
-/**
- * 探测当前已登录教务会话中是否可直接读取体测数据；若无此模块则返回 null（由 tzcs.ts 接管）。
- */
+/** 探测当前已登录教务会话中是否可直接读取体测数据 */
 export async function jwFitnessProbe(): Promise<string | null> {
   const candidates = ['/xstzcs!getDataList.action', '/tzcs!getDataList.action', '/xstzcj!getDataList.action'];
   for (const path of candidates) {
@@ -278,7 +188,7 @@ export async function jwFitnessProbe(): Promise<string | null> {
       const json = tryJsonText(res.data);
       if (json && /肺活量|50米|体前屈|fhl|sg|tz|height/i.test(json)) return json;
     } catch (err) {
-      if (err instanceof JwLoginRequired) return null;
+      if (err instanceof GdutAuthRequired) return null;
     }
   }
   return null;
@@ -287,18 +197,12 @@ export async function jwFitnessProbe(): Promise<string | null> {
 export interface JwEmptyClassroomQuery {
   semesterCode: string;
   week: number;
-  /** 1 = 周一 .. 7 = 周日 */
   weekday: number;
-  /** 节次块编码，如 '0102'、'0304' */
   periodCode: string;
-  /** 可选校区代码 */
   campusCode?: string;
 }
 
-/**
- * 实时查询广工乘方教务系统空教室（kxjscx / jxcdxx / cdjycx）。
- * 自动尝试常见接口路径，并在需要时探测页面内真实 AJAX action 或提取 HTML 表格。
- */
+/** 实时查询广工乘方教务系统空教室（kxjscx / jxcdxx / cdjycx） */
 export async function jwEmptyClassroomsPayload(query: JwEmptyClassroomQuery): Promise<string> {
   const form: Record<string, string> = {
     xnxqdm: query.semesterCode,
@@ -325,7 +229,6 @@ export async function jwEmptyClassroomsPayload(query: JwEmptyClassroomQuery): Pr
     if (json) return json;
   }
 
-  // 回退读取空教室查询页，自动探测真实 AJAX 地址或服务端渲染表格
   const pagePaths = ['/kxjscx!kxjscxList.action', '/jxcdxx!kxjsList.action', '/cdjycx!kxjsList.action'];
   for (const pagePath of pagePaths) {
     const pageRes = await jwRequest(
@@ -350,4 +253,92 @@ export async function jwEmptyClassroomsPayload(query: JwEmptyClassroomQuery): Pr
   }
 
   return '{"total":0,"rows":[]}';
+}
+
+/** 探测广工教务系统「培养方案完成情况 / 学分统计」 */
+export async function jwCreditAuditPayload(): Promise<string | null> {
+  const form = { page: '1', rows: '60' };
+  const candidates = [
+    '/xsxy!getDataList.action',
+    '/xsgrpyfa!getDataList.action',
+    '/pyfawc!getDataList.action',
+    '/xskccjxx!getXfTj.action',
+  ];
+
+  for (const path of candidates) {
+    try {
+      const res = await jwRequest(path, { method: 'POST', data: form });
+      if (res.status >= 400) continue;
+      const json = tryJsonText(res.data);
+      if (json && /yqxf|yxxf|qxxf|要求学分|已修学分|kcxz/i.test(json)) return json;
+    } catch (err) {
+      if (err instanceof GdutAuthRequired) throw err;
+    }
+  }
+
+  const pagePaths = ['/xsxy!xsxyList.action', '/xsgrpyfa!xsgrpyfaList.action'];
+  for (const pagePath of pagePaths) {
+    try {
+      const res = await jwRequest(pagePath);
+      if (res.status >= 400) continue;
+      const html = typeof res.data === 'string' ? res.data : JSON.stringify(res.data);
+      if (/<tr\b/i.test(html) && /要求学分|计划学分|最低学分/.test(html)) return html;
+    } catch (err) {
+      if (err instanceof GdutAuthRequired) throw err;
+    }
+  }
+
+  return null;
+}
+
+/**
+ * 直连广工教务抓取全校公共选修课与体育选课开课目录：
+ * 自动依次探测「选课列表（公选/体育）」与「常年开放的全校开课/课程库查询」分页接口，
+ * 最多拉取 5 页（1000 条）合并返回给 shared/parseElectiveCatalog 过滤入库。
+ */
+export async function jwElectiveCatalogPayload(semesterCode: string): Promise<{ raw: string; assumeElective: boolean }> {
+  const probeEndpoints: { path: string; extra: Record<string, string>; assumeElective: boolean }[] = [
+    { path: '/xsxk!getGgxxkList.action', extra: { xnxqdm: semesterCode }, assumeElective: true },
+    { path: '/xsxk!getDataList.action', extra: { xnxqdm: semesterCode, kclbdm: 'ggxxk' }, assumeElective: true },
+    { path: '/qxkbcx!getDataList.action', extra: { xnxqdm: semesterCode }, assumeElective: false },
+    { path: '/jxrwwh!getDataList.action', extra: { xnxqdm: semesterCode }, assumeElective: false },
+    { path: '/kckcx!getDataList.action', extra: { xnxqdm: semesterCode }, assumeElective: false },
+  ];
+
+  for (const ep of probeEndpoints) {
+    try {
+      const firstRes = await jwRequest(ep.path, {
+        method: 'POST',
+        data: { ...ep.extra, page: '1', rows: '200' },
+      });
+      if (firstRes.status >= 400) continue;
+      const firstText = tryJsonText(firstRes.data);
+      if (!firstText) continue;
+      const parsed = JSON.parse(firstText) as { total?: number; rows?: unknown[] };
+      if (!Array.isArray(parsed.rows) || parsed.rows.length === 0) continue;
+
+      const allRows = [...parsed.rows];
+      const total = typeof parsed.total === 'number' ? parsed.total : allRows.length;
+      const pages = Math.min(5, Math.ceil(total / 200));
+      for (let p = 2; p <= pages; p++) {
+        const nextRes = await jwRequest(ep.path, {
+          method: 'POST',
+          data: { ...ep.extra, page: String(p), rows: '200' },
+        });
+        const nextText = tryJsonText(nextRes.data);
+        if (!nextText) break;
+        const nextParsed = JSON.parse(nextText) as { rows?: unknown[] };
+        if (Array.isArray(nextParsed.rows) && nextParsed.rows.length > 0) {
+          allRows.push(...nextParsed.rows);
+        } else {
+          break;
+        }
+      }
+      return { raw: JSON.stringify({ total: allRows.length, rows: allRows }), assumeElective: ep.assumeElective };
+    } catch (err) {
+      if (err instanceof GdutAuthRequired) throw err;
+    }
+  }
+
+  return { raw: '{"total":0,"rows":[]}', assumeElective: false };
 }

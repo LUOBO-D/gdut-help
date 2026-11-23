@@ -63,6 +63,11 @@ model User {
   exams                 Exam[]
   fitnessRecords        FitnessRecord[]
   courseGrades          CourseGrade[]
+  creditPlan            UserCreditPlan?
+  secondClassRecords    SecondClassRecord[]
+  submittedSharedCourses SharedCourse[]
+  courseReviews         CourseReview[]
+  courseReviewLikes     CourseReviewLike[]
 
   @@map("users")
 }
@@ -625,4 +630,168 @@ model CourseGrade {
   @@index([userId, semesterCode])
   @@index([userId, importKey])
   @@map("course_grades")
+}
+
+/// 个人学分毕业目标与第二课堂目标配置（含教务培养方案学分完成情况官方快照）
+model UserCreditPlan {
+  userId                    String    @id @map("user_id") @db.Uuid
+  totalTarget               Float     @default(160) @map("total_target")
+  generalRequiredTarget     Float     @default(42) @map("general_required_target")
+  majorRequiredTarget       Float     @default(64) @map("major_required_target")
+  majorElectiveTarget       Float     @default(22) @map("major_elective_target")
+  generalElectiveTarget     Float     @default(10) @map("general_elective_target")
+  practiceTarget            Float     @default(22) @map("practice_target")
+  majorName                 String?   @map("major_name")
+  /// 教务培养方案完成情况官方模块列表 JSON
+  officialModules           Json?     @map("official_modules")
+  officialSyncedAt          DateTime? @map("official_synced_at") @db.Timestamptz
+  secondClassSemesterTarget Float     @default(12) @map("second_class_semester_target")
+  secondClassYearTarget     Float     @default(24) @map("second_class_year_target")
+  updatedAt                 DateTime  @updatedAt @map("updated_at") @db.Timestamptz
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("user_credit_plans")
+}
+
+enum SecondClassCategory {
+  ideology
+  volunteer
+  innovation
+  culture
+  practice
+  leadership
+}
+
+enum SecondClassStatus {
+  approved
+  pending
+}
+
+/// 个人第二课堂（素质拓展）活动时长记录：按学期与学年聚合统计
+model SecondClassRecord {
+  id           String              @id @default(uuid()) @db.Uuid
+  userId       String              @map("user_id") @db.Uuid
+  /// 学年，例如 '2026-2027'
+  academicYear String              @map("academic_year")
+  /// 学期代码，例如 '202601'
+  semesterCode String              @map("semester_code")
+  title        String
+  category     SecondClassCategory
+  /// 认定或待审时长（小时/学时）
+  hours        Float
+  /// 折算二课学分（可选，默认 0）
+  credits      Float               @default(0)
+  /// 活动日期 'YYYY-MM-DD'
+  activityDate String              @map("activity_date")
+  organizer    String?
+  status       SecondClassStatus   @default(approved)
+  source       CourseSource        @default(manual)
+  importKey    String?             @map("import_key")
+  note         String?
+  createdAt    DateTime            @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt    DateTime            @updatedAt @map("updated_at") @db.Timestamptz
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, academicYear, semesterCode])
+  @@index([userId, importKey])
+  @@map("second_class_records")
+}
+
+enum SharedCourseCategory {
+  general_elective
+  general_required
+  major_required
+  major_elective
+  pe
+  other
+}
+
+enum CourseAttendanceLevel {
+  none
+  occasional
+  strict
+}
+
+enum CourseExamFormat {
+  open_book
+  closed_book
+  paper
+  project
+  mixed
+}
+
+/// 选课评价全校共享课程库（仅聚焦「公共选修课」与「体育选课」，按 课程名 + 任课老师 + 校区 唯一）
+model SharedCourse {
+  id             String               @id @default(uuid()) @db.Uuid
+  courseCode     String?              @map("course_code")
+  courseName     String               @map("course_name")
+  teacherName    String               @map("teacher_name")
+  campusId       String               @default("hemc") @map("campus_id")
+  category       SharedCourseCategory @default(general_elective)
+  subCategory    String?              @map("sub_category")
+  department     String?
+  credits        Float?
+  submittedBy    String?              @map("submitted_by") @db.Uuid
+  ratingOverall  Float                @default(0) @map("rating_overall")
+  ratingGrading  Float                @default(0) @map("rating_grading")
+  ratingWorkload Float                @default(0) @map("rating_workload")
+  ratingQuality  Float                @default(0) @map("rating_quality")
+  reviewCount    Int                  @default(0) @map("review_count")
+  bayesScore     Float                @default(0) @map("bayes_score")
+  topTags        String[]             @default([]) @map("top_tags")
+  createdAt      DateTime             @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt      DateTime             @updatedAt @map("updated_at") @db.Timestamptz
+
+  submitter User?          @relation(fields: [submittedBy], references: [id], onDelete: SetNull)
+  reviews   CourseReview[]
+
+  @@unique([courseName, teacherName, campusId])
+  @@index([campusId, bayesScore])
+  @@index([category, bayesScore])
+  @@index([courseName])
+  @@index([teacherName])
+  @@map("shared_courses")
+}
+
+/// 选课评价明细（每人每门「课程+老师」一条评价，支持匿名展示与点赞「有用」）
+model CourseReview {
+  id            String                @id @default(uuid()) @db.Uuid
+  courseId      String                @map("course_id") @db.Uuid
+  userId        String                @map("user_id") @db.Uuid
+  scoreOverall  Int                   @map("score_overall") @db.SmallInt
+  scoreGrading  Int                   @map("score_grading") @db.SmallInt
+  scoreWorkload Int                   @map("score_workload") @db.SmallInt
+  scoreQuality  Int                   @map("score_quality") @db.SmallInt
+  attendance    CourseAttendanceLevel
+  examFormat    CourseExamFormat      @map("exam_format")
+  semesterTaken String?               @map("semester_taken")
+  tags          String[]              @default([])
+  content       String                @default("")
+  anonymous     Boolean               @default(false)
+  likeCount     Int                   @default(0) @map("like_count")
+  status        ReviewStatus          @default(visible)
+  createdAt     DateTime              @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt     DateTime              @updatedAt @map("updated_at") @db.Timestamptz
+
+  course SharedCourse       @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  user   User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  likes  CourseReviewLike[]
+
+  @@unique([userId, courseId])
+  @@index([courseId, status, likeCount])
+  @@map("course_reviews")
+}
+
+model CourseReviewLike {
+  reviewId  String   @map("review_id") @db.Uuid
+  userId    String   @map("user_id") @db.Uuid
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  review CourseReview @relation(fields: [reviewId], references: [id], onDelete: Cascade)
+  user   User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([reviewId, userId])
+  @@map("course_review_likes")
 }

@@ -1,6 +1,11 @@
 import {
   DEFAULT_CAMPUS_ID,
   defaultAcademicYear,
+  defaultSemesterCode,
+  type CourseListQuery,
+  type CourseReviewDetailResponse,
+  type CourseReviewListResponse,
+  type CreditPlan,
   type CurrentFitnessData,
   type DiningContext,
   type ExamData,
@@ -17,6 +22,7 @@ import {
   type NotificationPage,
   type RankingResponse,
   type RankingType,
+  type SecondClassSummaryResponse,
   type TimetableData,
   type Todo,
   type UserPreference,
@@ -33,6 +39,26 @@ export const keys = {
   fitness: ['fitness'] as const,
   fitnessCurrent: (academicYear?: string) => ['fitness', 'current', academicYear ?? defaultAcademicYear()] as const,
   grades: ['grades'] as const,
+  creditPlan: ['grades', 'credit-plan'] as const,
+  secondClassPrefix: ['second-class'] as const,
+  secondClassSummary: (academicYear?: string, semesterCode?: string) =>
+    ['second-class', 'summary', academicYear ?? defaultAcademicYear(), semesterCode ?? defaultSemesterCode()] as const,
+  sharedCoursesPrefix: ['course-reviews', 'courses'] as const,
+  sharedCourses: (q: Partial<CourseListQuery>) =>
+    [
+      'course-reviews',
+      'courses',
+      q.q ?? '',
+      q.category ?? '',
+      q.subCategory ?? '',
+      q.campusId ?? '',
+      q.tag ?? '',
+      q.sort ?? 'bayes',
+      q.onlyReviewed ? '1' : '0',
+      q.page ?? 1,
+      q.pageSize ?? 30,
+    ] as const,
+  sharedCourseDetail: (courseId: string) => ['course-reviews', 'detail', courseId] as const,
   todos: ['todos'] as const,
   notifications: ['notifications'] as const,
   preferences: ['preferences'] as const,
@@ -107,6 +133,55 @@ export function useGrades() {
     queryFn: () => api<GradeData>('/grades'),
     enabled: useLoggedIn(),
     staleTime: 2 * 60_000,
+  });
+}
+
+export function useCreditPlan() {
+  return useQuery({
+    queryKey: keys.creditPlan,
+    queryFn: () => api<CreditPlan>('/grades/credit-plan'),
+    enabled: useLoggedIn(),
+    staleTime: 5 * 60_000,
+  });
+}
+
+export function useSecondClassSummary(academicYear?: string, semesterCode?: string) {
+  const year = academicYear ?? defaultAcademicYear();
+  const sem = semesterCode ?? defaultSemesterCode();
+  const qs = new URLSearchParams({ academicYear: year, semesterCode: sem });
+  return useQuery({
+    queryKey: keys.secondClassSummary(year, sem),
+    queryFn: () => api<SecondClassSummaryResponse>(`/second-class/summary?${qs.toString()}`),
+    enabled: useLoggedIn(),
+    staleTime: 2 * 60_000,
+  });
+}
+
+export function useSharedCourses(query: Partial<CourseListQuery>) {
+  const qs = new URLSearchParams();
+  if (query.q?.trim()) qs.set('q', query.q.trim());
+  if (query.category) qs.set('category', query.category);
+  if (query.subCategory?.trim()) qs.set('subCategory', query.subCategory.trim());
+  if (query.campusId) qs.set('campusId', query.campusId);
+  if (query.tag?.trim()) qs.set('tag', query.tag.trim());
+  if (query.sort) qs.set('sort', query.sort);
+  if (query.onlyReviewed) qs.set('onlyReviewed', 'true');
+  if (query.page) qs.set('page', String(query.page));
+  if (query.pageSize) qs.set('pageSize', String(query.pageSize));
+  const suffix = qs.toString() ? `?${qs.toString()}` : '';
+  return useQuery({
+    queryKey: keys.sharedCourses(query),
+    queryFn: () => api<CourseReviewListResponse>(`/course-reviews/courses${suffix}`),
+    enabled: useLoggedIn(),
+    staleTime: 60_000,
+  });
+}
+
+export function useSharedCourseDetail(courseId: string | null) {
+  return useQuery({
+    queryKey: keys.sharedCourseDetail(courseId ?? ''),
+    queryFn: () => api<CourseReviewDetailResponse>(`/course-reviews/courses/${courseId}`),
+    enabled: useLoggedIn() && Boolean(courseId),
   });
 }
 

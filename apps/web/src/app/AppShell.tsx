@@ -4,6 +4,7 @@ import { Outlet, useLocation } from 'react-router';
 import { ErrorBoundary, PageErrorFallback } from '../components/ErrorBoundary';
 import { SideNav } from '../components/SideNav';
 import { TabBar } from '../components/TabBar';
+import { initGdutSessionKeepAlive } from '../lib/gdut-auth';
 import { useAppShortcuts } from '../lib/use-shortcuts';
 
 /**
@@ -16,6 +17,9 @@ import { useAppShortcuts } from '../lib/use-shortcuts';
 export function AppShell() {
   useAppShortcuts();
   const { pathname } = useLocation();
+
+  // 安卓端前台轻量心跳保活：已连接广工统一认证时每 15 分钟保活，避免教务会话闲置掉线
+  useEffect(() => initGdutSessionKeepAlive(), []);
 
   // 首屏渲染后空闲预加载其余常用主 Tab 分包，切换学业/校园/吃什么/待办零等待
   useEffect(() => {

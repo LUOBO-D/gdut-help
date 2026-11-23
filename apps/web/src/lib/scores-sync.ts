@@ -9,12 +9,16 @@
  */
 import {
   defaultAcademicYear,
+  parseCreditAudit,
   parseFitnessImport,
   parseGradeImport,
+  parseSecondClassImport,
+  type CreditPlan,
   type FitnessGender,
   type FitnessGradeYear,
   type FitnessRecord,
   type GradeSyncResult,
+  type SecondClassSyncResult,
 } from '@gduthelp/shared';
 import type { QueryClient } from '@tanstack/react-query';
 import { api } from './api';
@@ -246,6 +250,107 @@ export function syncCurrentFitnessFromSchool(opts: {
     fitnessSyncInFlight = null;
   });
   return fitnessSyncInFlight;
+}
+
+/**
+ * 同步学分进度：优先同时拉取教务成绩与培养方案学分完成情况，
+ * 即便学校暂未开放培养方案审核接口，也会基于已同步成绩自动完成五大模块学分核算。
+ */
+export async function syncCreditAuditFromSchool(opts: {
+  interactive: boolean;
+  queryClient: QueryClient;
+  currentPlan: CreditPlan;
+}): Promise<SyncOutcome> {
+  const gradeRes = await syncGradesFromSchool({ interactive: opts.interactive, queryClient: opts.queryClient });
+  if (gradeRes.status === 'cancelled' || gradeRes.status === 'login-required' || gradeRes.status === 'error') {
+    return gradeRes;
+  }
+
+  if (isNative) {
+    try {
+      const jw = await import('./jw');
+      const rawAudit = await jw.jwCreditAuditPayload();
+      if (rawAudit) {
+        const modules = parseCreditAudit(rawAudit);
+        if (modules.length > 0) {
+          await api<CreditPlan>('/grades/credit-plan', {
+            method: 'PUT',
+            body: {
+              totalTarget: opts.currentPlan.totalTarget,
+              generalRequiredTarget: opts.currentPlan.generalRequiredTarget,
+              majorRequiredTarget: opts.currentPlan.majorRequiredTarget,
+              majorElectiveTarget: opts.currentPlan.majorElectiveTarget,
+              generalElectiveTarget: opts.currentPlan.generalElectiveTarget,
+              practiceTarget: opts.currentPlan.practiceTarget,
+              majorName: opts.currentPlan.majorName,
+              officialModules: modules,
+            },
+          });
+          await opts.queryClient.invalidateQueries({ queryKey: keys.creditPlan });
+          return {
+            status: 'synced',
+            added: gradeRes.status === 'synced' ? gradeRes.added : 0,
+            changed: modules.length,
+            total: modules.length,
+            message: `已同步最新成绩与教务培养方案（${modules.length} 个学分模块）`,
+          };
+        }
+      }
+    } catch {
+      // 教务未开放培养方案直连时静默回退为成绩核算结果
+    }
+  }
+
+  return gradeRes;
+}
+
+/** 直连广工第二课堂 / 网上办事大厅拉取当前学年与学期时长记录 */
+export async function syncSecondClassFromSchool(opts: {
+  interactive: boolean;
+  queryClient: QueryClient;
+}): Promise<SyncOutcome> {
+  if (!isNative) {
+    return { status: 'error', message: '网页端受跨域限制，请使用安卓 App 直连查询或点击「粘贴导入」' };
+  }
+
+  try {
+    const sc = await import('./second-class');
+    let raw: string;
+    try {
+      raw = await sc.fetchSecondClassRawPayload();
+    } catch (err) {
+      if (!(err instanceof sc.SecondClassLoginRequired)) throw err;
+      if (!opts.interactive) {
+        return { status: 'login-required', message: '二课系统登录已过期，点击「查询同步」重新认证' };
+      }
+      const ok = await sc.loginToSecondClass();
+      if (!ok) return { status: 'cancelled', message: '已取消第二课堂登录' };
+      raw = await sc.fetchSecondClassRawPayload();
+    }
+
+    const parsed = parseSecondClassImport(raw);
+    if (parsed.length === 0) {
+      return {
+        status: 'empty',
+        message: '学校二课系统暂未返回可解析的活动列表，可直接点击「粘贴导入」或「记录活动」',
+      };
+    }
+
+    const res = await api<SecondClassSyncResult>('/second-class/sync', {
+      method: 'POST',
+      body: { records: parsed },
+    });
+    await opts.queryClient.invalidateQueries({ queryKey: keys.secondClassPrefix });
+
+    const msg =
+      res.added > 0 || res.updated > 0
+        ? `已同步第二课堂：新增 ${res.added} 条、更新 ${res.updated} 条`
+        : `已是最新第二课堂时长（共 ${res.total} 条记录）`;
+    return { status: 'synced', added: res.added, changed: res.updated, total: res.total, message: msg };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : '查询第二课堂失败，请确认校园网连接或改用粘贴导入';
+    return { status: 'error', message: msg };
+  }
 }
 
 export function formatRelativeSyncTime(iso: string | null | undefined, now: Date = new Date()): string {
