@@ -73,6 +73,7 @@ export class RecommendController {
   }
 
   @Get('recommend/meals')
+  @Throttle({ default: { limit: 20, ttl: 60_000 } })
   recommendMeals(
     @CurrentUser() user: AuthUser,
     @Query({ schema: recommendQuerySchema }) q: z.output<typeof recommendQuerySchema>,

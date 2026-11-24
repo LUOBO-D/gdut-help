@@ -1,5 +1,6 @@
-import { Body, Controller, Delete, Get, HttpCode, Param, Post, Put, Query } from '@nestjs/common';
+import { Body, Controller, Delete, Get, HttpCode, Param, Post, Put, Query, Req } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
+import type { Request } from 'express';
 import {
   courseInputSchema,
   semesterInputSchema,
@@ -16,6 +17,7 @@ import {
 } from '@gduthelp/shared';
 import { z } from 'zod';
 import { AdminOnly, CurrentUser, type AuthUser } from '../auth/auth.decorators.js';
+import { clientIp } from '../common/client-ip.js';
 import { TimetableService } from './timetable.service.js';
 
 type CourseData = z.output<typeof courseInputSchema>;
@@ -53,11 +55,14 @@ export class TimetableController {
     return this.timetable.createShare(user.id);
   }
 
-  /** 通过 6 位分享码获取脱敏后的课表快照 */
+  /** 通过 6 位分享码获取脱敏后的课表快照（严格限流 + 错误猜码计入主动防御风控） */
   @Get('timetable/share/:code')
-  @Throttle({ default: { limit: 30, ttl: 60_000 } })
-  getShare(@Param('code', { schema: timetableShareCodeSchema }) code: string): Promise<TimetableSharePayload> {
-    return this.timetable.getShare(code);
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
+  getShare(
+    @Param('code', { schema: timetableShareCodeSchema }) code: string,
+    @Req() req: Request,
+  ): Promise<TimetableSharePayload> {
+    return this.timetable.getShare(code, clientIp(req));
   }
 
   @Post('courses')

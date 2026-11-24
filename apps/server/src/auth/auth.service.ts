@@ -26,6 +26,7 @@ import {
   verifyPassword,
 } from './token.util.js';
 import { UserGuardCacheService } from './user-guard-cache.service.js';
+import { ActiveDefenseService } from '../security/active-defense.service.js';
 
 export const JWT_ISSUER = 'gduthelp';
 
@@ -34,6 +35,9 @@ export const AUTH_LIMITS = {
   resendCooldownSeconds: 60,
   codesPerEmailPerDay: 10,
   codesPerIpPerDay: 30,
+  /** 全站每小时/每日验证码发信熔断上限，防止僵尸网络分布式邮件轰炸刷爆 SMTP 配额 */
+  globalCodesPerHour: 150,
+  globalCodesPerDay: 600,
   maxAttemptsPerCode: 5,
   maxPasswordFailures: 5,
   maxPasswordFailuresPerIp: 20,
@@ -95,6 +99,7 @@ export class AuthService implements OnApplicationBootstrap, OnModuleDestroy {
     private readonly mail: MailService,
     @Inject(ENV) private readonly env: Env,
     @Optional() private readonly guardCache?: UserGuardCacheService,
+    @Optional() private readonly defense?: ActiveDefenseService,
   ) {}
 
   getAuthConfig(): AuthConfig {
@@ -158,12 +163,20 @@ export class AuthService implements OnApplicationBootstrap, OnModuleDestroy {
       }
     }
 
-    const [emailCount, ipCount] = await Promise.all([
+    const hourAgo = new Date(now - 60 * 60 * 1000);
+    const [emailCount, ipCount, globalHourCount, globalDayCount] = await Promise.all([
       this.prisma.emailCode.count({ where: { email, createdAt: { gte: dayAgo } } }),
       this.prisma.emailCode.count({ where: { ip, createdAt: { gte: dayAgo } } }),
+      this.prisma.emailCode.count({ where: { createdAt: { gte: hourAgo } } }),
+      this.prisma.emailCode.count({ where: { createdAt: { gte: dayAgo } } }),
     ]);
     if (emailCount >= AUTH_LIMITS.codesPerEmailPerDay || ipCount >= AUTH_LIMITS.codesPerIpPerDay) {
+      this.defense?.recordIncident(ip, 'quota_abuse', '/api/v1/auth/email-code');
       throw new AppException(ErrorCode.EMAIL_CODE_DAILY_LIMIT, '今天获取验证码的次数太多了，明天再试', HttpStatus.TOO_MANY_REQUESTS);
+    }
+    if (globalHourCount >= AUTH_LIMITS.globalCodesPerHour || globalDayCount >= AUTH_LIMITS.globalCodesPerDay) {
+      this.logger.warn(`触发全站验证码发信熔断：近1小时=${globalHourCount}，近24小时=${globalDayCount}`);
+      throw new AppException(ErrorCode.TOO_MANY_REQUESTS, '当前验证码发送繁忙，请稍后再试', HttpStatus.TOO_MANY_REQUESTS);
     }
 
     const code = generateEmailCode();
@@ -216,6 +229,7 @@ export class AuthService implements OnApplicationBootstrap, OnModuleDestroy {
       this.recordFailure(this.passwordFailures, email, AUTH_LIMITS.maxPasswordFailures, now);
       if (ip && ip !== 'unknown') {
         this.recordFailure(this.ipPasswordFailures, ip, AUTH_LIMITS.maxPasswordFailuresPerIp, now);
+        this.defense?.recordIncident(ip, 'auth_failure', '/api/v1/auth/login/password');
       }
       throw invalidPassword();
     }

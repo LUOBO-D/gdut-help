@@ -1,12 +1,17 @@
 import { randomUUID } from 'node:crypto';
 import { Logger } from '@nestjs/common';
 import type { NextFunction, Request, Response } from 'express';
+import type { ActiveDefenseService } from '../security/active-defense.service.js';
 import { clientIp } from './client-ip.js';
 
 const SAFE_REQ_ID = /^[a-zA-Z0-9._-]{8,64}$/;
 const securityLogger = new Logger('Security');
 
-/** 常见自动化漏洞扫描器与敏感文件探测路径（在进入路由或 SPA 回退前直接 404 拦截） */
+/** 主动诱捕蜜罐路径：正常用户绝不会访问，命中即判定为恶意侦察并立即隔离封禁 */
+const HONEYPOT_PROBE_RE =
+  /(?:^|\/)(?:\.env(?:\.|$)|\.git\/config|wp-login\.php|phpinfo\.php|backup\.sql|dump\.sql|db\.sql|api\/v1\/(?:admin\/debug|internal\/dump|debug\/vars|graphql))$/i;
+
+/** 常见自动化漏洞扫描器与敏感文件探测路径 */
 const SCANNER_PROBE_RE =
   /(?:^|\/)(?:\.env(?:\.|$)|\.git(?:\/|$)|\.svn(?:\/|$)|\.htaccess|\.htpasswd|wp-admin|wp-login|wp-content|wp-includes|xmlrpc\.php|phpmyadmin|pma|adminer|cgi-bin|actuator|server-status|boaform)|\.(?:php|asp|aspx|jsp|cgi|sql|bak|old|swp|dist)$/i;
 
@@ -29,13 +34,18 @@ export interface RequestWithId extends Request {
 }
 
 /**
- * 全局安全中间件：
- * 1. 分配合法 X-Request-Id；
- * 2. 拦截路径穿越、空字节与常见自动化漏洞扫描探测；
- * 3. 注入全套浏览器安全响应头（CSP / HSTS / COOP / XFO / nosniff / Permissions-Policy）；
- * 4. 对敏感 API 响应默认禁止代理与浏览器缓存（Cache-Control: no-store, private）。
+ * 全局主动安全防御中间件：
+ * 1. 分配合法 X-Request-Id 并注入全套浏览器安全响应头（CSP / HSTS / COOP / XFO / nosniff / Permissions-Policy）；
+ * 2. 查询 ActiveDefenseService：处于隔离期的高危 IP / 网段零 DB 开销直接 403 阻断；
+ * 3. 蜜罐诱捕（Honeypot）：命中伪装敏感路径立即拉黑隔离并触发宿主机 fail2ban 联动；
+ * 4. 焦油坑（Tarpit）：中高风险来源自动注入受控延迟，大幅拖垮自动化扫描效率；
+ * 5. 敏感 API 响应默认禁止代理与浏览器缓存（Cache-Control: no-store, private）。
  */
-export function createSecurityMiddleware(isProduction: boolean, allowCrossOrigin = false) {
+export function createSecurityMiddleware(
+  isProduction: boolean,
+  allowCrossOrigin = false,
+  defense?: ActiveDefenseService,
+) {
   return function securityMiddleware(req: RequestWithId, res: Response, next: NextFunction) {
     const incoming = req.header('x-request-id');
     const requestId = incoming && SAFE_REQ_ID.test(incoming) ? incoming : randomUUID();
@@ -55,24 +65,63 @@ export function createSecurityMiddleware(isProduction: boolean, allowCrossOrigin
       res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains; preload');
     }
 
+    const ip = clientIp(req);
     const rawUrl = req.originalUrl ?? req.url ?? '';
     const pathname = rawUrl.split('?')[0] ?? '';
 
+    if (pathname.startsWith('/api/') && !pathname.startsWith('/api/v1/app/bundles/')) {
+      res.setHeader('Cache-Control', 'no-store, private');
+      res.setHeader('Pragma', 'no-cache');
+    }
+
+    // 1. 隔离期高危来源直接拦截（不消耗后端业务/数据库资源）
+    if (defense && !pathname.endsWith('/health')) {
+      const decision = defense.evaluate(ip);
+      if (decision.blocked) {
+        if (decision.retryAfterSeconds) {
+          res.setHeader('Retry-After', String(decision.retryAfterSeconds));
+        }
+        res.setHeader('Cache-Control', 'no-store');
+        res.status(403).json({ code: 4030, data: null, message: '请求触发安全防护，已暂时拦截' });
+        return;
+      }
+
+      // 2. 蜜罐诱捕：命中高价值诱饵直接 403 + 立即隔离 + 联动 fail2ban
+      if (HONEYPOT_PROBE_RE.test(pathname)) {
+        defense.recordIncident(ip, 'honeypot_hit', pathname);
+        securityLogger.warn(`[HONEYPOT_TRAP] 命中蜜罐诱饵 ${req.method} ${pathname.slice(0, 120)} ip=${ip}`);
+        res.setHeader('Cache-Control', 'no-store');
+        res.status(403).json({ code: 4030, data: null, message: '访问被安全策略拒绝' });
+        return;
+      }
+    } else if (HONEYPOT_PROBE_RE.test(pathname)) {
+      securityLogger.warn(`拦截敏感路径探测 ${req.method} ${pathname.slice(0, 120)} ip=${ip}`);
+      res.setHeader('Cache-Control', 'no-store');
+      res.status(404).json({ code: 4040, data: null, message: '资源不存在' });
+      return;
+    }
+
+    // 3. 路径穿越、空字节与常规漏洞扫描探测
     if (
       rawUrl.includes('\0') ||
       /%00/i.test(rawUrl) ||
       /(?:^|\/)\.\.(?:\/|$)|%2e%2e/i.test(rawUrl) ||
       SCANNER_PROBE_RE.test(pathname)
     ) {
-      securityLogger.warn(`拦截恶意扫描探测 ${req.method} ${pathname.slice(0, 120)} ip=${clientIp(req)}`);
+      defense?.recordIncident(ip, 'scanner_probe', pathname);
+      securityLogger.warn(`拦截恶意扫描探测 ${req.method} ${pathname.slice(0, 120)} ip=${ip}`);
       res.setHeader('Cache-Control', 'no-store');
       res.status(404).json({ code: 4040, data: null, message: '资源不存在' });
       return;
     }
 
-    if (pathname.startsWith('/api/') && !pathname.startsWith('/api/v1/app/bundles/')) {
-      res.setHeader('Cache-Control', 'no-store, private');
-      res.setHeader('Pragma', 'no-cache');
+    // 4. 焦油坑受控减速
+    if (defense && !pathname.endsWith('/health')) {
+      const decision = defense.evaluate(ip);
+      if (decision.tarpitMs > 0) {
+        void defense.applyTarpit(decision.tarpitMs).then(() => next());
+        return;
+      }
     }
 
     next();

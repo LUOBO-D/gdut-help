@@ -34,15 +34,34 @@ describe('WeatherService', () => {
   });
 
   it('超过缓存容量上限时自动淘汰旧条目，防止内存无限增长', async () => {
-    vi.spyOn(providers, 'fetchOpenMeteo').mockResolvedValue(mockReport);
-    const service = new WeatherService({ QWEATHER_API_HOST: '', QWEATHER_API_KEY: '' } as Env);
+    vi.useFakeTimers();
+    try {
+      vi.spyOn(providers, 'fetchOpenMeteo').mockResolvedValue(mockReport);
+      const service = new WeatherService({ QWEATHER_API_HOST: '', QWEATHER_API_KEY: '' } as Env);
 
-    for (let i = 0; i < 120; i++) {
-      await service.get(20 + i * 0.05, 113, `loc-${i}`);
+      for (let i = 0; i < 120; i++) {
+        if (i > 0 && i % 15 === 0) vi.advanceTimersByTime(61_000);
+        await service.get(20 + i * 0.05, 113, `loc-${i}`);
+      }
+
+      const internalCache = (service as unknown as { cache: Map<string, unknown> }).cache;
+      expect(internalCache.size).toBeLessThanOrEqual(100);
+    } finally {
+      vi.useRealTimers();
     }
+  });
 
-    const internalCache = (service as unknown as { cache: Map<string, unknown> }).cache;
-    expect(internalCache.size).toBeLessThanOrEqual(100);
+  it('单分钟大量随机自定义坐标请求触发防刷熔断，优雅回退至默认校区天气', async () => {
+    const spy = vi.spyOn(providers, 'fetchOpenMeteo').mockResolvedValue(mockReport);
+    const service = new WeatherService({ QWEATHER_API_HOST: '', QWEATHER_API_KEY: '' } as Env);
+    // 先预热大学城校区天气
+    await service.get(23.04, 113.4, '大学城');
+    for (let i = 0; i < 20; i++) {
+      const r = await service.get(25 + i * 0.1, 110 + i * 0.1, `rand-${i}`);
+      expect(r.now.temp).toBe(24);
+    }
+    // 1 次校区预热 + 最多 15 次自定义坐标上游调用
+    expect(spy).toHaveBeenCalledTimes(16);
   });
 
   it('缓存过 10 分钟但仍在 6 小时内时启用 SWR 立即返回旧缓存并后台刷新', async () => {

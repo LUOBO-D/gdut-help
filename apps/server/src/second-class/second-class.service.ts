@@ -85,6 +85,10 @@ export class SecondClassService {
   }
 
   async create(userId: string, data: SecondClassInputData): Promise<SecondClassRecord> {
+    const count = await this.prisma.secondClassRecord.count({ where: { userId } });
+    if (count >= 400) {
+      throw new AppException(ErrorCode.VALIDATION_FAILED, '最多保存 400 条第二课堂活动记录');
+    }
     const semesterCode = data.semesterCode
       ? normalizeSemesterCode(data.semesterCode)
       : inferSemesterCodeFromDate(data.activityDate);

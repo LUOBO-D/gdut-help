@@ -1,9 +1,10 @@
-import { HttpStatus, Inject, Injectable, Logger } from '@nestjs/common';
+import { HttpStatus, Inject, Injectable, Logger, Optional } from '@nestjs/common';
 import { ErrorCode, isTrustedPushEndpoint, type PushPayload, type PushSubscriptionInput } from '@gduthelp/shared';
 import { sendNotification, WebPushError } from 'web-push';
 import { AppException } from '../common/app.exception.js';
 import { ENV, type Env } from '../config/env.js';
 import { PrismaService } from '../prisma/prisma.service.js';
+import { ActiveDefenseService } from '../security/active-defense.service.js';
 
 const MAX_SUBSCRIPTIONS_PER_USER = 10;
 
@@ -14,6 +15,7 @@ export class PushService {
   constructor(
     private readonly prisma: PrismaService,
     @Inject(ENV) private readonly env: Env,
+    @Optional() private readonly defense?: ActiveDefenseService,
   ) {}
 
   get publicKey(): string | null {
@@ -24,8 +26,9 @@ export class PushService {
     return Boolean(this.env.VAPID_PUBLIC_KEY && this.env.VAPID_PRIVATE_KEY);
   }
 
-  async subscribe(userId: string, sub: PushSubscriptionInput, userAgent?: string) {
+  async subscribe(userId: string, sub: PushSubscriptionInput, userAgent?: string, ip?: string) {
     if (!isTrustedPushEndpoint(sub.endpoint)) {
+      if (ip) this.defense?.recordIncident(ip, 'ssrf_attempt', '/api/v1/push/subscriptions', userId);
       throw new AppException(ErrorCode.VALIDATION_FAILED, '不受信任的推送服务地址', HttpStatus.BAD_REQUEST);
     }
 

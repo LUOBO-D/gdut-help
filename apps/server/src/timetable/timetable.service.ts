@@ -28,6 +28,7 @@ import type { z } from 'zod';
 import { AppException } from '../common/app.exception.js';
 import type { Course as CourseRow, CourseSlot, Prisma, Semester as SemesterRow } from '../generated/prisma/client.js';
 import { PrismaService } from '../prisma/prisma.service.js';
+import { ActiveDefenseService } from '../security/active-defense.service.js';
 
 const SHARE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 const SHARE_TTL_MS = 7 * 24 * 3600_000;
@@ -75,6 +76,7 @@ export class TimetableService {
   constructor(
     private readonly prisma: PrismaService,
     @Optional() private readonly courseReviews?: CourseReviewService,
+    @Optional() private readonly defense?: ActiveDefenseService,
   ) {}
 
   async currentSemester(): Promise<Semester | null> {
@@ -291,12 +293,13 @@ export class TimetableService {
     throw new AppException(ErrorCode.INTERNAL_ERROR, '生成分享码失败，请重试', HttpStatus.INTERNAL_SERVER_ERROR);
   }
 
-  async getShare(code: string): Promise<TimetableSharePayload> {
+  async getShare(code: string, ip?: string): Promise<TimetableSharePayload> {
     const row = await this.prisma.timetableShare.findUnique({
       where: { code: code.toUpperCase() },
       include: { semester: { select: { name: true } } },
     });
     if (!row || row.expiresAt.getTime() < Date.now()) {
+      if (ip) this.defense?.recordIncident(ip, 'share_code_miss', '/api/v1/timetable/share');
       throw new AppException(ErrorCode.NOT_FOUND, '分享码不存在或已过期', HttpStatus.NOT_FOUND);
     }
     const courses = Array.isArray(row.courses) ? (row.courses as unknown as TimetableSharePayload['courses']) : [];

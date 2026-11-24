@@ -61,6 +61,7 @@ describe('CourseReviewService', () => {
 
     expect(detail.reviews).toHaveLength(1);
     expect(detail.reviews[0]?.authorNickname).toBe('广工同学');
+    expect(detail.reviews[0]?.userId).toBe('');
     expect(detail.reviews[0]?.isMine).toBe(false);
     expect(detail.attendanceStats.none).toBe(1);
     expect(detail.examFormatStats.paper).toBe(1);
@@ -85,6 +86,7 @@ describe('CourseReviewService', () => {
         ]),
         createMany,
         update,
+        count: vi.fn().mockResolvedValue(0),
       },
     } as unknown as PrismaService;
 

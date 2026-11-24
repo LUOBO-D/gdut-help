@@ -1,6 +1,7 @@
 import { isTrustedPushEndpoint } from '@gduthelp/shared';
 import type { Response } from 'express';
 import { describe, expect, it, vi } from 'vitest';
+import { ActiveDefenseService } from '../security/active-defense.service.js';
 import { createSecurityMiddleware, type RequestWithId } from './security.middleware.js';
 
 function createMockRes() {
@@ -59,6 +60,36 @@ describe('securityMiddleware', () => {
       expect(next).not.toHaveBeenCalled();
       expect(getStatus()).toBe(404);
     }
+  });
+
+  it('traps attacker hitting honeypot and quarantines subsequent requests with 403', () => {
+    const defense = new ActiveDefenseService();
+    const activeMw = createSecurityMiddleware(true, true, defense);
+
+    const trapReq = {
+      method: 'GET',
+      originalUrl: '/api/v1/admin/debug',
+      header: () => undefined,
+      ip: '203.0.113.77',
+    } as unknown as RequestWithId;
+    const trapRes = createMockRes();
+    const trapNext = vi.fn();
+    activeMw(trapReq, trapRes.res, trapNext);
+    expect(trapNext).not.toHaveBeenCalled();
+    expect(trapRes.getStatus()).toBe(403);
+
+    // Follow-up normal API call from same attacker IP is instantly blocked with 403
+    const nextReq = {
+      method: 'GET',
+      originalUrl: '/api/v1/grades',
+      header: () => undefined,
+      ip: '203.0.113.77',
+    } as unknown as RequestWithId;
+    const nextRes = createMockRes();
+    const nextFn = vi.fn();
+    activeMw(nextReq, nextRes.res, nextFn);
+    expect(nextFn).not.toHaveBeenCalled();
+    expect(nextRes.getStatus()).toBe(403);
   });
 });
 

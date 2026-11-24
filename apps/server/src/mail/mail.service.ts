@@ -14,6 +14,9 @@ export class MailService {
             host: env.SMTP_HOST,
             port: env.SMTP_PORT,
             secure: env.SMTP_SECURE,
+            connectionTimeout: 8_000,
+            greetingTimeout: 8_000,
+            socketTimeout: 12_000,
             auth: env.SMTP_USER ? { user: env.SMTP_USER, pass: env.SMTP_PASS } : undefined,
           })
         : null;

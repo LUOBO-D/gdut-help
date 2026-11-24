@@ -1,4 +1,5 @@
 import { Controller, Get, Query } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 import { DEFAULT_CAMPUS_ID, findCampus, type WeatherReport } from '@gduthelp/shared';
 import { z } from 'zod';
 import { CurrentUser, type AuthUser } from '../auth/auth.decorators.js';
@@ -22,6 +23,7 @@ export class WeatherController {
 
   /** 按坐标、指定校区或本人所在校区查询；都没有时用大学城校区 */
   @Get()
+  @Throttle({ default: { limit: 20, ttl: 60_000 } })
   async get(@CurrentUser() user: AuthUser, @Query({ schema: querySchema }) q: z.infer<typeof querySchema>): Promise<WeatherReport> {
     if (q.lat !== undefined && q.lng !== undefined) return this.weather.get(q.lat, q.lng, '当前位置');
     let campus = findCampus(q.campusId);

@@ -114,6 +114,10 @@ export class GradeService {
   }
 
   async create(userId: string, data: CourseGradeInputData): Promise<CourseGrade> {
+    const count = await this.prisma.courseGrade.count({ where: { userId } });
+    if (count >= 300) {
+      throw new AppException(ErrorCode.VALIDATION_FAILED, '最多保存 300 条课程成绩记录');
+    }
     const row = await this.prisma.courseGrade.create({
       data: {
         userId,

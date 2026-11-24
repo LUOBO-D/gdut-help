@@ -19,6 +19,7 @@ import { NotifyModule } from './notify/notify.module.js';
 import { RecommendModule } from './recommend/recommend.module.js';
 import { ReviewModule } from './review/review.module.js';
 import { SecondClassModule } from './second-class/second-class.module.js';
+import { SecurityModule } from './security/security.module.js';
 import { TimetableModule } from './timetable/timetable.module.js';
 import { TodoModule } from './todo/todo.module.js';
 import { UsersModule } from './users/users.module.js';
@@ -33,6 +34,7 @@ import { WeatherModule } from './weather/weather.module.js';
       { name: 'default', ttl: 60_000, limit: 120 },
     ]),
     PrismaModule,
+    SecurityModule,
     MailModule,
     AppUpdateModule,
     AuthModule,

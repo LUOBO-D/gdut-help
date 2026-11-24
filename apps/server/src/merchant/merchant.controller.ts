@@ -42,8 +42,11 @@ export class MerchantController {
   constructor(private readonly merchants: MerchantService) {}
 
   @Get('merchants')
-  list(@Query({ schema: listQuerySchema }) q: z.output<typeof listQuerySchema>): Promise<Merchant[]> {
-    return this.merchants.listApproved(q);
+  list(
+    @CurrentUser() user: AuthUser,
+    @Query({ schema: listQuerySchema }) q: z.output<typeof listQuerySchema>,
+  ): Promise<Merchant[]> {
+    return this.merchants.listApproved(q, user);
   }
 
   @Get('merchants/similar')

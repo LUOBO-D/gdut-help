@@ -52,32 +52,39 @@ export class UsersService {
         where: { userId },
         include: { slots: true, semester: { select: { name: true } } },
         orderBy: { createdAt: 'asc' },
+        take: 200,
       }),
       this.prisma.exam.findMany({
         where: { userId },
         include: { semester: { select: { name: true } } },
         orderBy: [{ examDate: 'asc' }, { startTime: 'asc' }],
+        take: 200,
       }),
       this.prisma.fitnessRecord.findMany({
         where: { userId },
         orderBy: [{ academicYear: 'desc' }, { gradeYear: 'desc' }],
+        take: 50,
       }),
       this.prisma.courseGrade.findMany({
         where: { userId },
         orderBy: [{ semesterCode: 'desc' }, { credits: 'desc' }],
+        take: 500,
       }),
       this.prisma.todo.findMany({
         where: { userId },
         orderBy: { createdAt: 'asc' },
+        take: 500,
       }),
       this.prisma.moodLog.findMany({
         where: { userId },
         orderBy: { date: 'desc' },
+        take: 500,
       }),
       this.prisma.review.findMany({
         where: { userId },
         include: { merchant: { select: { name: true } } },
         orderBy: { createdAt: 'desc' },
+        take: 200,
       }),
     ]);
 

@@ -34,11 +34,19 @@ self.addEventListener('push', (event) => {
   );
 });
 
-// 点击通知：已打开的窗口直接跳转并聚焦，否则新开一个
+// 点击通知：已打开的窗口直接跳转并聚焦，否则新开一个（严格限制仅允许同源路径，防止开放重定向）
 self.addEventListener('notificationclick', (event) => {
   event.notification.close();
-  const link = (event.notification.data as { link?: string } | null)?.link ?? '/';
-  const url = new URL(link, self.location.origin).href;
+  const rawLink = (event.notification.data as { link?: string } | null)?.link ?? '/';
+  let url = self.location.origin + '/';
+  try {
+    const parsed = new URL(rawLink, self.location.origin);
+    if (parsed.origin === self.location.origin) {
+      url = parsed.href;
+    }
+  } catch {
+    // 非法 URL 回退首页
+  }
   event.waitUntil(
     (async () => {
       const windows = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });

@@ -40,6 +40,10 @@ export class CourseSelectionService {
   }
 
   async create(userId: string, input: CourseSelectionInput): Promise<CourseSelectionReminder> {
+    const count = await this.prisma.courseSelectionReminder.count({ where: { userId } });
+    if (count >= 30) {
+      throw new AppException(ErrorCode.VALIDATION_FAILED, '最多保存 30 条选课时间提醒');
+    }
     const row = await this.prisma.courseSelectionReminder.create({
       data: {
         userId,

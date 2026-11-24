@@ -37,7 +37,24 @@ export class CetService {
     return rows.map(toCetRecord);
   }
 
-  async upsert(userId: string, input: CetRecordInput, source: 'manual' | 'jw' = 'manual'): Promise<CetRecord> {
+  async upsert(
+    userId: string,
+    input: CetRecordInput,
+    source: 'manual' | 'jw' = 'manual',
+    skipCapCheck = false,
+  ): Promise<CetRecord> {
+    if (!skipCapCheck) {
+      const existing = await this.prisma.cetRecord.findUnique({
+        where: { userId_level_examSession: { userId, level: input.level, examSession: input.examSession } },
+        select: { id: true },
+      });
+      if (!existing) {
+        const count = await this.prisma.cetRecord.count({ where: { userId } });
+        if (count >= 30) {
+          throw new AppException(ErrorCode.VALIDATION_FAILED, '最多保存 30 条四六级成绩记录');
+        }
+      }
+    }
     const row = await this.prisma.cetRecord.upsert({
       where: {
         userId_level_examSession: {
@@ -107,7 +124,7 @@ export class CetService {
         },
         select: { id: true },
       });
-      await this.upsert(userId, item, 'jw');
+      await this.upsert(userId, item, 'jw', true);
       if (existing) updated += 1;
       else added += 1;
     }

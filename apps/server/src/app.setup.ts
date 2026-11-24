@@ -9,6 +9,7 @@ import { RequestLoggingInterceptor } from './common/request-logging.interceptor.
 import { ResponseInterceptor } from './common/response.interceptor.js';
 import { createSecurityMiddleware } from './common/security.middleware.js';
 import type { Env } from './config/env.js';
+import { ActiveDefenseService } from './security/active-defense.service.js';
 
 /** 统一装配 Express 安全中间件、全局管道、响应包装器与异常过滤器，供生产入口与 E2E 测试共用 */
 export function configureApp(app: NestExpressApplication, env: Env) {
@@ -16,10 +17,16 @@ export function configureApp(app: NestExpressApplication, env: Env) {
   app.useBodyParser('json', { limit: '256kb' });
   app.useBodyParser('urlencoded', { limit: '64kb', extended: false });
 
-  // 只信任本机反向代理（Vite 开发代理、Nginx、tailscale serve）提供的 X-Forwarded-For
+  // 只信任本机反向代理（Vite 开发代理、Nginx、Caddy、tailscale serve）提供的 X-Forwarded-For
   app.set('trust proxy', 'loopback');
   app.disable('x-powered-by');
-  app.use(createSecurityMiddleware(env.NODE_ENV === 'production', env.CORS_ORIGINS.length > 0));
+  let defense: ActiveDefenseService | undefined;
+  try {
+    defense = app.get(ActiveDefenseService, { strict: false });
+  } catch {
+    defense = undefined;
+  }
+  app.use(createSecurityMiddleware(env.NODE_ENV === 'production', env.CORS_ORIGINS.length > 0, defense));
   app.setGlobalPrefix('api/v1');
 
   // 网页和 API 同源，不需要跨域。只有安卓 App（页面来自 https://localhost）需要。

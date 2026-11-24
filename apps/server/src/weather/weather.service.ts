@@ -1,5 +1,5 @@
 import { HttpStatus, Inject, Injectable, Logger, OnApplicationBootstrap, OnModuleDestroy } from '@nestjs/common';
-import { DEFAULT_CAMPUS_ID, ErrorCode, findCampus, type WeatherReport } from '@gduthelp/shared';
+import { CAMPUSES, DEFAULT_CAMPUS_ID, ErrorCode, findCampus, type WeatherReport } from '@gduthelp/shared';
 import { AppException } from '../common/app.exception.js';
 import { ENV, type Env } from '../config/env.js';
 import { fetchMetNo, fetchOpenMeteo, fetchQWeather, type ProviderReport } from './providers.js';
@@ -14,6 +14,9 @@ const STALE_WARN_MS = 30 * 60 * 1000;
 const STALE_MAX_MS = 6 * 60 * 60 * 1000;
 /** 进程内缓存上限，防止随机坐标查询导致内存无限增长 */
 const MAX_CACHE_ENTRIES = 100;
+/** 非广工校区自定义坐标全站每分钟上游调用上限，防止攻击者遍历全球经纬度耗尽和风天气配额 */
+const MAX_CUSTOM_COORD_UPSTREAM_PER_MIN = 15;
+const PROTECTED_CAMPUS_KEYS = new Set(CAMPUSES.map((c) => `${c.lat.toFixed(2)},${c.lng.toFixed(2)}`));
 
 interface Entry {
   report: ProviderReport;
@@ -28,6 +31,8 @@ export class WeatherService implements OnApplicationBootstrap, OnModuleDestroy {
   private readonly inflight = new Map<string, Promise<ProviderReport>>();
   private warmupTimer: NodeJS.Timeout | null = null;
   private retryTimer: NodeJS.Timeout | null = null;
+  private customWindowStart = 0;
+  private customWindowCount = 0;
 
   constructor(@Inject(ENV) private readonly env: Env) {}
 
@@ -67,6 +72,17 @@ export class WeatherService implements OnApplicationBootstrap, OnModuleDestroy {
       return this.toReport(entry, location, age >= STALE_WARN_MS);
     }
 
+    // 防御随机经纬度刷空上游天气配额：超出非校区自定义坐标熔断阈值时，优雅降级返回默认校区缓存天气
+    if (!PROTECTED_CAMPUS_KEYS.has(key) && !this.consumeCustomQuota(now)) {
+      const defCampus = findCampus(DEFAULT_CAMPUS_ID);
+      const defKey = defCampus ? `${defCampus.lat.toFixed(2)},${defCampus.lng.toFixed(2)}` : '';
+      const defEntry = defKey ? this.cache.get(defKey) : undefined;
+      if (defEntry) {
+        return this.toReport(defEntry, defCampus?.area ?? location, false);
+      }
+      throw new AppException(ErrorCode.TOO_MANY_REQUESTS, '定位天气查询繁忙，请稍后再试', HttpStatus.TOO_MANY_REQUESTS);
+    }
+
     try {
       const report = await this.fetchOnce(key, lat, lng);
       const fresh: Entry = { report, fetchedAt: Date.now() };
@@ -80,6 +96,10 @@ export class WeatherService implements OnApplicationBootstrap, OnModuleDestroy {
   }
 
   private async refreshInBackground(key: string, lat: number, lng: number): Promise<boolean> {
+    if (!PROTECTED_CAMPUS_KEYS.has(key) && !this.consumeCustomQuota(Date.now())) {
+      return false;
+    }
+
     try {
       const report = await this.fetchOnce(key, lat, lng);
       this.store(key, { report, fetchedAt: Date.now() });
@@ -108,14 +128,25 @@ export class WeatherService implements OnApplicationBootstrap, OnModuleDestroy {
     if (this.cache.size <= MAX_CACHE_ENTRIES) return;
     const now = Date.now();
     for (const [k, v] of this.cache) {
+      if (PROTECTED_CAMPUS_KEYS.has(k)) continue;
       if (now - v.fetchedAt > STALE_MAX_MS) this.cache.delete(k);
       if (this.cache.size <= MAX_CACHE_ENTRIES) return;
     }
-    while (this.cache.size > MAX_CACHE_ENTRIES) {
-      const oldest = this.cache.keys().next().value;
-      if (oldest === undefined) break;
-      this.cache.delete(oldest);
+    for (const k of this.cache.keys()) {
+      if (this.cache.size <= MAX_CACHE_ENTRIES) break;
+      if (PROTECTED_CAMPUS_KEYS.has(k)) continue;
+      this.cache.delete(k);
     }
+  }
+
+  private consumeCustomQuota(now: number): boolean {
+    if (now - this.customWindowStart >= 60_000) {
+      this.customWindowStart = now;
+      this.customWindowCount = 0;
+    }
+    if (this.customWindowCount >= MAX_CUSTOM_COORD_UPSTREAM_PER_MIN) return false;
+    this.customWindowCount += 1;
+    return true;
   }
 
   private async fetchProvider(lat: number, lng: number): Promise<ProviderReport> {

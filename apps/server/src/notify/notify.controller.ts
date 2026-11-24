@@ -1,5 +1,6 @@
-import { Body, Controller, Delete, Get, Headers, HttpCode, Post } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Headers, HttpCode, Post, Req } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
+import type { Request } from 'express';
 import {
   markReadSchema,
   pushSubscriptionSchema,
@@ -9,6 +10,7 @@ import {
 } from '@gduthelp/shared';
 import { z } from 'zod';
 import { CurrentUser, type AuthUser } from '../auth/auth.decorators.js';
+import { clientIp } from '../common/client-ip.js';
 import { NotifyService } from './notify.service.js';
 import { PushService } from './push.service.js';
 
@@ -56,8 +58,9 @@ export class NotifyController {
     @CurrentUser() user: AuthUser,
     @Body({ schema: pushSubscriptionSchema }) body: PushSubscriptionInput,
     @Headers('user-agent') ua: string | undefined,
+    @Req() req: Request,
   ): Promise<null> {
-    await this.push.subscribe(user.id, body, ua);
+    await this.push.subscribe(user.id, body, ua, clientIp(req));
     return null;
   }
 

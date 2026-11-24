@@ -50,6 +50,10 @@ export class ExamService {
 
   async create(userId: string, data: ExamInputData): Promise<Exam> {
     const semester = await this.timetable.ensureCurrentSemester();
+    const count = await this.prisma.exam.count({ where: { userId, semesterId: semester.id } });
+    if (count >= 60) {
+      throw new AppException(ErrorCode.VALIDATION_FAILED, '单学期最多记录 60 场考试');
+    }
     const row = await this.prisma.exam.create({
       data: {
         userId,

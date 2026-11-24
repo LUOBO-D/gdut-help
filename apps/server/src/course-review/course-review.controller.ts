@@ -37,7 +37,7 @@ export class CourseReviewController {
     @CurrentUser() user: AuthUser,
     @Body({ schema: catalogImportSchema }) body: CatalogImportRequest,
   ): Promise<CatalogImportResult> {
-    return this.service.importCatalog(body.items, user.id);
+    return this.service.importCatalog(body.items, user.id, user.role === 'admin');
   }
 
   @Post('courses')

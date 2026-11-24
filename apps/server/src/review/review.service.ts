@@ -141,7 +141,8 @@ export class ReviewService {
     const reviews: Review[] = rows.map((r) => ({
       id: r.id,
       merchantId: r.merchantId,
-      userId: r.userId,
+      // 脱敏隔离：不对其他用户暴露他人内部 userId，防止跨模块用户画像关联
+      userId: r.userId === viewerId ? r.userId : '',
       authorNickname: r.user.nickname,
       scoreTaste: r.scoreTaste,
       scoreValue: r.scoreValue,

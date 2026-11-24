@@ -29,6 +29,7 @@ function makeHarness() {
   const courseGrade = {
     findMany: vi.fn(),
     findFirst: vi.fn(),
+    count: vi.fn().mockResolvedValue(0),
     create: vi.fn(),
     update: vi.fn(),
     delete: vi.fn(),

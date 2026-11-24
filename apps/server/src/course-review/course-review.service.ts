@@ -29,6 +29,10 @@ import { PrismaService } from '../prisma/prisma.service.js';
 type Tx = Prisma.TransactionClient;
 
 const ALLOWED_CATEGORIES: SharedCourseCategory[] = ['general_elective', 'pe'];
+const MAX_SHARED_COURSES_TOTAL = 10_000;
+const MAX_USER_CATALOG_IMPORT_PER_DAY = 300;
+const MAX_CATALOG_UPDATES_PER_CALL = 200;
+const UPDATE_CHUNK_SIZE = 20;
 
 const normalizeCategory = (raw: SharedCourseRow['category']): SharedCourseCategory =>
   raw === 'pe' ? 'pe' : 'general_elective';
@@ -146,8 +150,13 @@ export class CourseReviewService implements OnModuleInit {
   /**
    * 批量幂等导入广工公共选修课与体育选课目录（供教务一键同步或网页表格导入）。
    * 绝不覆盖已有评价、均分与口碑标签，仅新增课程或补全缺失的课程代码/学院/学分/模块信息。
+   * 防护：非管理员每日新增上限 300 条、全库上限 10,000 条、更新分批并发执行防 N+1 拖垮数据库。
    */
-  async importCatalog(items: CatalogImportItem[], submittedBy: string | null): Promise<CatalogImportResult> {
+  async importCatalog(
+    items: CatalogImportItem[],
+    submittedBy: string | null,
+    isAdmin = false,
+  ): Promise<CatalogImportResult> {
     const dedup = new Map<string, CatalogImportItem>();
     for (const raw of items) {
       const courseName = normalizeCourseIdentity(raw.courseName).slice(0, 80);
@@ -213,7 +222,7 @@ export class CourseReviewService implements OnModuleInit {
         if (!existing.department && item.department) patch.department = item.department;
         if (existing.credits == null && item.credits != null) patch.credits = item.credits;
 
-        if (Object.keys(patch).length > 0) {
+        if (Object.keys(patch).length > 0 && toUpdate.length < MAX_CATALOG_UPDATES_PER_CALL) {
           toUpdate.push({ id: existing.id, data: patch });
         } else {
           skipped += 1;
@@ -223,15 +232,37 @@ export class CourseReviewService implements OnModuleInit {
 
     let added = 0;
     if (toCreate.length > 0) {
-      const created = await this.prisma.sharedCourse.createMany({
-        data: toCreate,
-        skipDuplicates: true,
-      });
-      added = created.count;
+      let allowedCreates = toCreate;
+      if (!isAdmin && submittedBy) {
+        const since = new Date(Date.now() - 24 * 60 * 60 * 1000);
+        const [todayCount, totalCount] = await Promise.all([
+          this.prisma.sharedCourse.count({ where: { submittedBy, createdAt: { gte: since } } }),
+          this.prisma.sharedCourse.count(),
+        ]);
+        const remainUser = Math.max(0, MAX_USER_CATALOG_IMPORT_PER_DAY - todayCount);
+        const remainGlobal = Math.max(0, MAX_SHARED_COURSES_TOTAL - totalCount);
+        const cap = Math.min(remainUser, remainGlobal);
+        if (cap === 0 && toUpdate.length === 0) {
+          throw new AppException(
+            ErrorCode.TOO_MANY_REQUESTS,
+            '今日课程目录新增已达配额上限，明天再来补充吧',
+            HttpStatus.TOO_MANY_REQUESTS,
+          );
+        }
+        allowedCreates = toCreate.slice(0, cap);
+      }
+      if (allowedCreates.length > 0) {
+        const created = await this.prisma.sharedCourse.createMany({
+          data: allowedCreates,
+          skipDuplicates: true,
+        });
+        added = created.count;
+      }
     }
 
-    for (const u of toUpdate) {
-      await this.prisma.sharedCourse.update({ where: { id: u.id }, data: u.data });
+    for (let i = 0; i < toUpdate.length; i += UPDATE_CHUNK_SIZE) {
+      const chunk = toUpdate.slice(i, i + UPDATE_CHUNK_SIZE);
+      await Promise.all(chunk.map((u) => this.prisma.sharedCourse.update({ where: { id: u.id }, data: u.data })));
     }
 
     return {
@@ -317,7 +348,8 @@ export class CourseReviewService implements OnModuleInit {
       return {
         id: r.id,
         courseId: r.courseId,
-        userId: r.userId,
+        // 脱敏隔离：仅对本人返回 userId，彻底防止通过 userId 跨接口关联反推匿名评价者真实身份
+        userId: r.userId === viewerId ? r.userId : '',
         authorNickname: r.anonymous ? '广工同学' : r.user.nickname,
         anonymous: r.anonymous,
         scoreOverall: r.scoreOverall,

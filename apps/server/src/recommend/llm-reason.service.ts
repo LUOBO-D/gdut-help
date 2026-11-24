@@ -6,6 +6,11 @@ import { ENV, type Env } from '../config/env.js';
 const TIMEOUT_MS = 3000;
 const CACHE_TTL_MS = 6 * 60 * 60 * 1000;
 const MAX_CACHE = 200;
+/** 单用户每日最多触发 12 次付费 LLM 润色，超额无缝降级为本地零成本规则引擎 */
+const MAX_USER_CALLS_PER_DAY = 12;
+/** 全站每分钟 LLM 调用硬熔断上限，防止分布式账号集群刷空 DeepSeek 余额 */
+const MAX_GLOBAL_CALLS_PER_MINUTE = 30;
+const MAX_USER_BUDGET_ENTRIES = 2000;
 
 const responseSchema = z.object({
   reasons: z.record(z.string(), z.string().trim().min(2).max(40)),
@@ -26,6 +31,9 @@ interface CacheEntry {
 export class LlmReasonService {
   private readonly logger = new Logger(LlmReasonService.name);
   private readonly cache = new Map<string, CacheEntry>();
+  private readonly userDailyCalls = new Map<string, number>();
+  private globalWindowStart = 0;
+  private globalWindowCount = 0;
 
   constructor(@Inject(ENV) private readonly env: Env) {}
 
@@ -48,6 +56,10 @@ export class LlmReasonService {
       return this.applyReasons(items, cached.reasons);
     }
 
+    if (!this.consumeBudget(opts.userId, opts.date)) {
+      return items;
+    }
+
     try {
       const reasons = await this.requestReasons(opts);
       this.store(cacheKey, reasons);
@@ -56,6 +68,29 @@ export class LlmReasonService {
       this.logger.warn(`大模型推荐语生成失败，已回退规则理由：${err instanceof Error ? err.message : String(err)}`);
       return items;
     }
+  }
+
+  private consumeBudget(userId: string, date: string, now = Date.now()): boolean {
+    if (now - this.globalWindowStart >= 60_000) {
+      this.globalWindowStart = now;
+      this.globalWindowCount = 0;
+    }
+    if (this.globalWindowCount >= MAX_GLOBAL_CALLS_PER_MINUTE) {
+      this.logger.warn('LLM 全站每分钟调用达到熔断阈值，已自动降级为规则推荐语');
+      return false;
+    }
+
+    const userKey = `${userId}|${date}`;
+    const count = this.userDailyCalls.get(userKey) ?? 0;
+    if (count >= MAX_USER_CALLS_PER_DAY) return false;
+
+    if (this.userDailyCalls.size >= MAX_USER_BUDGET_ENTRIES && !this.userDailyCalls.has(userKey)) {
+      const oldest = this.userDailyCalls.keys().next().value;
+      if (oldest !== undefined) this.userDailyCalls.delete(oldest);
+    }
+    this.userDailyCalls.set(userKey, count + 1);
+    this.globalWindowCount += 1;
+    return true;
   }
 
   private applyReasons(items: MealRecommendation[], reasons: Record<string, string>): MealRecommendation[] {

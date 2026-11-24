@@ -56,7 +56,8 @@ function serializeOpenHours(
   return { ...(meals ? { meals } : {}), ...(text ? { text } : {}) };
 }
 
-export function toMerchant(row: MerchantWithDishes): Merchant {
+export function toMerchant(row: MerchantWithDishes, viewer?: AuthUser): Merchant {
+  const canSeeSubmitter = Boolean(viewer && (row.submittedBy === viewer.id || viewer.role === 'admin'));
   return {
     id: row.id,
     name: row.name,
@@ -67,7 +68,7 @@ export function toMerchant(row: MerchantWithDishes): Merchant {
     priceAvg: row.priceAvg,
     tags: row.tags,
     openHours: parseOpenHours(row.openHours),
-    submittedBy: row.submittedBy,
+    submittedBy: canSeeSubmitter ? row.submittedBy : '',
     confirmCount: row.confirmCount,
     status: row.status,
     ratingAvg: row.ratingAvg,
@@ -87,6 +88,9 @@ const INCLUDE_DISHES = {
 };
 
 const MAX_MERCHANTS_PER_DAY_PUBLIC = 5;
+const MAX_MERCHANTS_PER_DAY_AUTO = 8;
+const MAX_DISHES_PER_DAY = 30;
+const MAX_DISHES_PER_MERCHANT = 50;
 
 @Injectable()
 export class MerchantService {
@@ -96,7 +100,10 @@ export class MerchantService {
   ) {}
 
   /** 浏览已上架商家（按校区、品类、关键词筛选） */
-  async listApproved(opts: { campusId?: string; category?: MerchantCategory; q?: string }): Promise<Merchant[]> {
+  async listApproved(
+    opts: { campusId?: string; category?: MerchantCategory; q?: string },
+    viewer?: AuthUser,
+  ): Promise<Merchant[]> {
     const campusId = opts.campusId || DEFAULT_CAMPUS_ID;
     const q = opts.q?.trim();
     const rows = await this.prisma.merchant.findMany({
@@ -118,7 +125,7 @@ export class MerchantService {
       orderBy: [{ bayesScore: 'desc' }, { createdAt: 'desc' }],
       take: 200,
     });
-    return rows.map(toMerchant);
+    return rows.map((r) => toMerchant(r, viewer));
   }
 
   /** 供推荐模块调用：获取指定校区全部已上架商家（含招牌菜品） */
@@ -127,8 +134,9 @@ export class MerchantService {
       where: { campusId, status: 'approved' },
       include: INCLUDE_DISHES,
       orderBy: { createdAt: 'desc' },
+      take: 250,
     });
-    return rows.map(toMerchant);
+    return rows.map((r) => toMerchant(r));
   }
 
   async getById(id: string, user: AuthUser): Promise<Merchant> {
@@ -137,7 +145,7 @@ export class MerchantService {
     if (row.status !== 'approved' && row.submittedBy !== user.id && user.role !== 'admin') {
       throw new AppException(ErrorCode.NOT_FOUND, '商家不存在', HttpStatus.NOT_FOUND);
     }
-    return toMerchant(row);
+    return toMerchant(row, user);
   }
 
   /** 提交前实时查重：返回同校区名称/位置相近的已有商家 */
@@ -159,21 +167,23 @@ export class MerchantService {
         priceAvg: true,
         status: true,
       },
+      take: 500,
     });
     return findSimilarMerchants(rows, opts.name, campusId, opts.locationText, opts.excludeId);
   }
 
-  /** 提交新商家：自用阶段（MERCHANT_AUTO_APPROVE=true）或管理员提交直接上架，否则进入 pending（并限制普通用户每日最多 5 家） */
+  /** 提交新商家：非管理员始终受每日提交配额保护，防止恶意刷屏污染全校商家库 */
   async create(user: AuthUser, input: MerchantInput): Promise<Merchant> {
-    if (!this.env.MERCHANT_AUTO_APPROVE && user.role !== 'admin') {
+    if (user.role !== 'admin') {
+      const limit = this.env.MERCHANT_AUTO_APPROVE ? MAX_MERCHANTS_PER_DAY_AUTO : MAX_MERCHANTS_PER_DAY_PUBLIC;
       const since = new Date(Date.now() - 24 * 60 * 60 * 1000);
       const count = await this.prisma.merchant.count({
         where: { submittedBy: user.id, createdAt: { gte: since } },
       });
-      if (count >= MAX_MERCHANTS_PER_DAY_PUBLIC) {
+      if (count >= limit) {
         throw new AppException(
           ErrorCode.TOO_MANY_REQUESTS,
-          `每人每天最多提交 ${MAX_MERCHANTS_PER_DAY_PUBLIC} 家商家，明天再来补充吧`,
+          `每人每天最多提交 ${limit} 家商家，明天再来补充吧`,
           HttpStatus.TOO_MANY_REQUESTS,
         );
       }
@@ -206,7 +216,7 @@ export class MerchantService {
       },
       include: INCLUDE_DISHES,
     });
-    return toMerchant(row);
+    return toMerchant(row, user);
   }
 
   async update(user: AuthUser, id: string, input: MerchantUpdateInput): Promise<Merchant> {
@@ -229,7 +239,7 @@ export class MerchantService {
       },
       include: INCLUDE_DISHES,
     });
-    return toMerchant(row);
+    return toMerchant(row, user);
   }
 
   async remove(user: AuthUser, id: string): Promise<void> {
@@ -246,6 +256,19 @@ export class MerchantService {
     if (!merchant) throw new AppException(ErrorCode.NOT_FOUND, '商家不存在', HttpStatus.NOT_FOUND);
     if (merchant.status !== 'approved' && merchant.submittedBy !== user.id && user.role !== 'admin') {
       throw new AppException(ErrorCode.FORBIDDEN, '该商家尚未上架', HttpStatus.FORBIDDEN);
+    }
+    if (user.role !== 'admin') {
+      const since = new Date(Date.now() - 24 * 60 * 60 * 1000);
+      const [merchantDishCount, userDailyCount] = await Promise.all([
+        this.prisma.dish.count({ where: { merchantId, status: 'visible' } }),
+        this.prisma.dish.count({ where: { submittedBy: user.id, createdAt: { gte: since } } }),
+      ]);
+      if (merchantDishCount >= MAX_DISHES_PER_MERCHANT) {
+        throw new AppException(ErrorCode.VALIDATION_FAILED, '该商家招牌菜数量已达上限', HttpStatus.BAD_REQUEST);
+      }
+      if (userDailyCount >= MAX_DISHES_PER_DAY) {
+        throw new AppException(ErrorCode.TOO_MANY_REQUESTS, '今天补充菜品太频繁了，明天再来吧', HttpStatus.TOO_MANY_REQUESTS);
+      }
     }
     const dish = await this.prisma.dish.create({
       data: {
@@ -278,7 +301,7 @@ export class MerchantService {
       orderBy: [{ createdAt: 'desc' }],
       take: 300,
     });
-    return rows.map(toMerchant);
+    return rows.map((r) => toMerchant(r, { id: '', role: 'admin' }));
   }
 
   async setStatus(id: string, status: MerchantStatus): Promise<Merchant> {
@@ -289,7 +312,7 @@ export class MerchantService {
       data: { status },
       include: INCLUDE_DISHES,
     });
-    return toMerchant(row);
+    return toMerchant(row, { id: '', role: 'admin' });
   }
 
   /**

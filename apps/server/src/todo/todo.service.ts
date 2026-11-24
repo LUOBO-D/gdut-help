@@ -20,6 +20,7 @@ type Tx = Prisma.TransactionClient;
 const PAST_GRACE_MS = 60_000;
 /** 已完成的待办在列表里保留几天 */
 const DONE_KEEP_DAYS = 7;
+const MAX_ACTIVE_TODOS_PER_USER = 500;
 
 const toTodo = (t: TodoRow & { reminders: Reminder[] }): Todo => ({
   id: t.id,
@@ -52,6 +53,10 @@ export class TodoService {
   }
 
   async create(userId: string, data: TodoData): Promise<Todo> {
+    const activeCount = await this.prisma.todo.count({ where: { userId, completedAt: null } });
+    if (activeCount >= MAX_ACTIVE_TODOS_PER_USER) {
+      throw new AppException(ErrorCode.VALIDATION_FAILED, `未完成待办最多保留 ${MAX_ACTIVE_TODOS_PER_USER} 条，请先清理已完成或过期项`);
+    }
     const row = await this.prisma.$transaction(async (tx) => {
       const todo = await tx.todo.create({ data: { userId, ...this.fields(data) } });
       await this.rebuildReminders(tx, todo, data.reminders);

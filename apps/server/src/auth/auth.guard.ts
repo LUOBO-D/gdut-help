@@ -4,6 +4,8 @@ import { JwtService } from '@nestjs/jwt';
 import { ErrorCode } from '@gduthelp/shared';
 import type { Request } from 'express';
 import { AppException } from '../common/app.exception.js';
+import { clientIp } from '../common/client-ip.js';
+import { ActiveDefenseService } from '../security/active-defense.service.js';
 import { IS_PUBLIC, REQUIRE_ADMIN, type AuthUser } from './auth.decorators.js';
 import type { AccessTokenPayload } from './auth.service.js';
 import { UserGuardCacheService } from './user-guard-cache.service.js';
@@ -14,6 +16,7 @@ export class AuthGuard implements CanActivate {
     private readonly reflector: Reflector,
     private readonly jwt: JwtService,
     @Optional() private readonly guardCache?: UserGuardCacheService,
+    @Optional() private readonly defense?: ActiveDefenseService,
   ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
@@ -32,7 +35,13 @@ export class AuthGuard implements CanActivate {
       });
       req.user = { id: payload.sub, role: payload.role };
       iatMs = typeof payload.iat === 'number' ? payload.iat * 1000 : undefined;
-    } catch {
+    } catch (err) {
+      // 区分正常过期（TokenExpiredError）与签名篡改/伪造令牌，后者计入高危风险分
+      const errName = err instanceof Error ? err.name : '';
+      if (errName !== 'TokenExpiredError') {
+        const path = (req.originalUrl ?? req.url ?? '').split('?')[0] ?? '';
+        this.defense?.recordIncident(clientIp(req), 'jwt_tamper', path);
+      }
       throw unauthorized();
     }
 
@@ -41,7 +50,11 @@ export class AuthGuard implements CanActivate {
     }
 
     const adminOnly = this.reflector.getAllAndOverride<boolean>(REQUIRE_ADMIN, [context.getHandler(), context.getClass()]);
-    if (adminOnly && req.user.role !== 'admin') throw new AppException(ErrorCode.FORBIDDEN, '需要管理员权限', 403);
+    if (adminOnly && req.user.role !== 'admin') {
+      const path = (req.originalUrl ?? req.url ?? '').split('?')[0] ?? '';
+      this.defense?.recordIncident(clientIp(req), 'admin_probe', path, req.user.id);
+      throw new AppException(ErrorCode.FORBIDDEN, '需要管理员权限', 403);
+    }
     return true;
   }
 }
