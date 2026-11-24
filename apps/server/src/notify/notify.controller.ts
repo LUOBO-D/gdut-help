@@ -51,6 +51,7 @@ export class NotifyController {
 
   @Post('push/subscriptions')
   @HttpCode(200)
+  @Throttle({ default: { limit: 15, ttl: 60_000 } })
   async subscribe(
     @CurrentUser() user: AuthUser,
     @Body({ schema: pushSubscriptionSchema }) body: PushSubscriptionInput,

@@ -18,6 +18,7 @@
     "db:down": "docker compose -f docker/docker-compose.yml down",
     "db:migrate": "pnpm --filter @gduthelp/server exec prisma migrate dev",
     "ota:pack": "node scripts/publish-ota.mjs",
-    "ota:cloud": "node scripts/deploy-ota-cloud.mjs"
+    "ota:cloud": "node scripts/deploy-ota-cloud.mjs",
+    "apk:release": "node scripts/build-release-apk.mjs"
   }
 }

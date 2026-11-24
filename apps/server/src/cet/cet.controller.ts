@@ -1,4 +1,5 @@
 import { Body, Controller, Delete, Get, HttpCode, Param, Post, Put } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 import {
   cetRecordInputSchema,
   cetSyncSchema,
@@ -23,6 +24,7 @@ export class CetController {
   }
 
   @Post()
+  @Throttle({ default: { limit: 20, ttl: 60_000 } })
   create(
     @CurrentUser() user: AuthUser,
     @Body({ schema: cetRecordInputSchema }) body: CetRecordInput,
@@ -31,6 +33,7 @@ export class CetController {
   }
 
   @Put(':id')
+  @Throttle({ default: { limit: 20, ttl: 60_000 } })
   update(
     @CurrentUser() user: AuthUser,
     @Param('id', { schema: idParam }) id: string,
@@ -41,6 +44,7 @@ export class CetController {
 
   @Post('sync')
   @HttpCode(200)
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
   sync(
     @CurrentUser() user: AuthUser,
     @Body({ schema: cetSyncSchema }) body: CetSyncRequest,

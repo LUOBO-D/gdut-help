@@ -1,8 +1,9 @@
 import { Module } from '@nestjs/common';
 import { APP_GUARD } from '@nestjs/core';
-import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
+import { ThrottlerModule } from '@nestjs/throttler';
 import { AppUpdateModule } from './app-update/app-update.module.js';
 import { AuthModule } from './auth/auth.module.js';
+import { ClientIpThrottlerGuard } from './common/client-ip-throttler.guard.js';
 import { AppConfigModule } from './config/config.module.js';
 import { CetModule } from './cet/cet.module.js';
 import { CourseReviewModule } from './course-review/course-review.module.js';
@@ -26,8 +27,11 @@ import { WeatherModule } from './weather/weather.module.js';
 @Module({
   imports: [
     AppConfigModule,
-    // 全局限流：每个 IP 每分钟 120 次，个别接口用 @Throttle 收紧
-    ThrottlerModule.forRoot([{ ttl: 60_000, limit: 120 }]),
+    // 两级全局限流：突发每秒上限 20 次 + 每分钟上限 120 次，敏感接口额外用 @Throttle 收紧
+    ThrottlerModule.forRoot([
+      { name: 'burst', ttl: 1_000, limit: 20 },
+      { name: 'default', ttl: 60_000, limit: 120 },
+    ]),
     PrismaModule,
     MailModule,
     AppUpdateModule,
@@ -49,7 +53,7 @@ import { WeatherModule } from './weather/weather.module.js';
     ReviewModule,
   ],
   controllers: [HealthController],
-  // 限流守卫先于登录守卫执行，未登录的暴力请求也会被拦住
-  providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],
+  // 限流守卫先于登录守卫执行，未登录的暴力请求也会被按真实客户端 IP 拦住
+  providers: [{ provide: APP_GUARD, useClass: ClientIpThrottlerGuard }],
 })
 export class AppModule {}

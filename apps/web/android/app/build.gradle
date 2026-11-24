@@ -1,25 +1,61 @@
 apply plugin: 'com.android.application'
 
+def keystorePropsFile = rootProject.file('keystore.properties')
+def keystoreProps = new Properties()
+if (keystorePropsFile.exists()) {
+    keystorePropsFile.withInputStream { keystoreProps.load(it) }
+}
+
+def releaseStoreFile = System.getenv('ANDROID_KEYSTORE_PATH') ?: keystoreProps.getProperty('storeFile')
+def releaseStorePassword = System.getenv('ANDROID_KEYSTORE_PASSWORD') ?: keystoreProps.getProperty('storePassword')
+def releaseKeyAlias = System.getenv('ANDROID_KEY_ALIAS') ?: keystoreProps.getProperty('keyAlias')
+def releaseKeyPassword = System.getenv('ANDROID_KEY_PASSWORD') ?: keystoreProps.getProperty('keyPassword')
+
 android {
     namespace = "io.github.luobod.gduthelp"
     compileSdk = rootProject.ext.compileSdkVersion
+    buildFeatures {
+        buildConfig = true
+    }
     defaultConfig {
         applicationId "io.github.luobod.gduthelp"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 5
-        versionName "0.3.4"
+        versionCode 6
+        versionName "0.3.12"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
-             // Default: https://android.googlesource.com/platform/frameworks/base/+/282e181b58cf72b6ca770dc7ca5f91f135444502/tools/aapt/AaptAssets.cpp#61
+             // Default: https://android.googlesource.com/platform/frameworks/base/+/282e181b58cf2b6ca770dc7ca5f91f135444502/tools/aapt/AaptAssets.cpp#61
             ignoreAssetsPattern = '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
+        }
+    }
+    signingConfigs {
+        release {
+            if (releaseStoreFile) {
+                storeFile file(releaseStoreFile)
+                storePassword releaseStorePassword
+                keyAlias releaseKeyAlias
+                keyPassword releaseKeyPassword
+                enableV1Signing true
+                enableV2Signing true
+                enableV3Signing true
+            }
         }
     }
     buildTypes {
         release {
-            minifyEnabled false
-            proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
+            // 严格禁止发布包可调试，彻底封堵 adb run-as / 附加调试器 / 内存转储风险
+            debuggable false
+            jniDebuggable false
+            minifyEnabled true
+            shrinkResources true
+            if (releaseStoreFile) {
+                signingConfig signingConfigs.release
+            } else if (gradle.startParameter.taskNames.any { it.toLowerCase().contains('release') }) {
+                throw new GradleException('缺少发布签名配置！请配置 apps/web/android/keystore.properties 或 ANDROID_KEYSTORE_* 环境变量，严禁分发未签名或 Debug 签名包。')
+            }
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
         }
     }
 }

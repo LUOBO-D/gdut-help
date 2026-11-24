@@ -1,8 +1,11 @@
-import { Inject, Injectable, Logger } from '@nestjs/common';
-import type { PushPayload, PushSubscriptionInput } from '@gduthelp/shared';
+import { HttpStatus, Inject, Injectable, Logger } from '@nestjs/common';
+import { ErrorCode, isTrustedPushEndpoint, type PushPayload, type PushSubscriptionInput } from '@gduthelp/shared';
 import { sendNotification, WebPushError } from 'web-push';
+import { AppException } from '../common/app.exception.js';
 import { ENV, type Env } from '../config/env.js';
 import { PrismaService } from '../prisma/prisma.service.js';
+
+const MAX_SUBSCRIPTIONS_PER_USER = 10;
 
 @Injectable()
 export class PushService {
@@ -22,12 +25,27 @@ export class PushService {
   }
 
   async subscribe(userId: string, sub: PushSubscriptionInput, userAgent?: string) {
+    if (!isTrustedPushEndpoint(sub.endpoint)) {
+      throw new AppException(ErrorCode.VALIDATION_FAILED, '不受信任的推送服务地址', HttpStatus.BAD_REQUEST);
+    }
+
     // 同一个浏览器换了账号登录时，订阅归属到新账号
     await this.prisma.pushSubscription.upsert({
       where: { endpoint: sub.endpoint },
       create: { userId, endpoint: sub.endpoint, p256dh: sub.keys.p256dh, auth: sub.keys.auth, userAgent: userAgent?.slice(0, 255) },
       update: { userId, p256dh: sub.keys.p256dh, auth: sub.keys.auth, lastUsedAt: new Date() },
     });
+
+    // 限制单账号最多保留 10 个推送订阅，防止恶意堆积
+    const overflow = await this.prisma.pushSubscription.findMany({
+      where: { userId },
+      orderBy: { lastUsedAt: 'desc' },
+      skip: MAX_SUBSCRIPTIONS_PER_USER,
+      select: { id: true },
+    });
+    if (overflow.length) {
+      await this.prisma.pushSubscription.deleteMany({ where: { id: { in: overflow.map((o) => o.id) } } });
+    }
   }
 
   async unsubscribe(userId: string, endpoint: string) {
@@ -43,6 +61,11 @@ export class PushService {
 
     await Promise.all(
       subs.map(async (s) => {
+        if (!isTrustedPushEndpoint(s.endpoint)) {
+          await this.prisma.pushSubscription.delete({ where: { id: s.id } }).catch(() => undefined);
+          result.removed++;
+          return;
+        }
         try {
           await sendNotification({ endpoint: s.endpoint, keys: { p256dh: s.p256dh, auth: s.auth } }, body, {
             vapidDetails: { subject: this.env.VAPID_SUBJECT, publicKey: this.env.VAPID_PUBLIC_KEY, privateKey: this.env.VAPID_PRIVATE_KEY },

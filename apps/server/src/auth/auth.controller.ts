@@ -83,9 +83,14 @@ export class AuthController {
     @Body({ schema: passwordLoginRequestSchema }) body: PasswordLoginRequest,
     @Headers('user-agent') userAgent: string | undefined,
     @Headers(NATIVE_CLIENT_HEADER) client: string | undefined,
+    @Req() req: Request,
     @Res({ passthrough: true }) res: unknown,
   ): Promise<AuthSession> {
-    return this.respond(res, client, await this.auth.loginWithPassword(body.email, body.password, userAgent));
+    return this.respond(
+      res,
+      client,
+      await this.auth.loginWithPassword(body.email, body.password, userAgent, clientIp(req)),
+    );
   }
 
   /** 邮箱验证码注册并设置密码（已用验证码登过的老账号也可借此设置密码） */

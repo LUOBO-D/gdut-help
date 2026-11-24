@@ -22,6 +22,7 @@ import {
   hashPassword,
   hashRefreshToken,
   safeEqualHex,
+  safeEqualText,
   verifyPassword,
 } from './token.util.js';
 import { UserGuardCacheService } from './user-guard-cache.service.js';
@@ -35,6 +36,7 @@ export const AUTH_LIMITS = {
   codesPerIpPerDay: 30,
   maxAttemptsPerCode: 5,
   maxPasswordFailures: 5,
+  maxPasswordFailuresPerIp: 20,
   passwordLockMinutes: 15,
   accessTokenSeconds: 15 * 60,
   refreshTokenDays: 30,
@@ -82,8 +84,10 @@ export class AuthService implements OnApplicationBootstrap, OnModuleDestroy {
   private readonly logger = new Logger(AuthService.name);
   private cleanupTimer: NodeJS.Timeout | null = null;
   private initialCleanupTimer: NodeJS.Timeout | null = null;
-  /** 按邮箱记录连续密码失败次数与锁定截止时间（内存有界，避免暴力撞库） */
+  /** 按邮箱记录连续密码失败次数与锁定截止时间（内存有界，避免针对单账号暴力撞库） */
   private readonly passwordFailures = new Map<string, { count: number; lockUntil: number }>();
+  /** 按客户端 IP 记录连续密码失败次数（防御跨账号密码喷洒攻击） */
+  private readonly ipPasswordFailures = new Map<string, { count: number; lockUntil: number }>();
 
   constructor(
     private readonly prisma: PrismaService,
@@ -196,25 +200,23 @@ export class AuthService implements OnApplicationBootstrap, OnModuleDestroy {
     return this.issueSession(user, userAgent);
   }
 
-  async loginWithPassword(rawEmail: string, password: string, userAgent?: string): Promise<IssuedSession> {
+  async loginWithPassword(rawEmail: string, password: string, userAgent?: string, ip?: string): Promise<IssuedSession> {
     const email = rawEmail.trim().toLowerCase();
     this.assertEmailDomainAllowed(email);
 
     const now = Date.now();
-    const fail = this.passwordFailures.get(email);
-    if (fail && fail.lockUntil > now) {
-      const remainMin = Math.max(1, Math.ceil((fail.lockUntil - now) / 60_000));
-      throw new AppException(
-        ErrorCode.TOO_MANY_REQUESTS,
-        `密码错误次数过多，请 ${remainMin} 分钟后再试或改用邮箱验证码登录`,
-        HttpStatus.TOO_MANY_REQUESTS,
-      );
+    this.assertNotPasswordLocked(this.passwordFailures, email, now);
+    if (ip && ip !== 'unknown') {
+      this.assertNotPasswordLocked(this.ipPasswordFailures, ip, now);
     }
 
     const user = await this.prisma.user.findUnique({ where: { email } });
     const ok = await verifyPassword(password, user?.passwordHash ?? DUMMY_PASSWORD_HASH);
     if (!user || !user.passwordHash || !ok) {
-      this.recordPasswordFailure(email, now);
+      this.recordFailure(this.passwordFailures, email, AUTH_LIMITS.maxPasswordFailures, now);
+      if (ip && ip !== 'unknown') {
+        this.recordFailure(this.ipPasswordFailures, ip, AUTH_LIMITS.maxPasswordFailuresPerIp, now);
+      }
       throw invalidPassword();
     }
     if (user.status === 'banned') throw banned();
@@ -296,21 +298,28 @@ export class AuthService implements OnApplicationBootstrap, OnModuleDestroy {
     if (!user) throw new AppException(ErrorCode.UNAUTHORIZED, '账号不存在', HttpStatus.UNAUTHORIZED);
     if (user.status === 'banned') throw banned();
 
+    const now = Date.now();
+    this.assertNotPasswordLocked(this.passwordFailures, user.email, now);
+
     if (user.passwordHash) {
       if (!input.currentPassword) {
         throw new AppException(ErrorCode.VALIDATION_FAILED, '请输入当前登录密码', HttpStatus.BAD_REQUEST);
       }
       const ok = await verifyPassword(input.currentPassword, user.passwordHash);
       if (!ok) {
+        this.recordFailure(this.passwordFailures, user.email, AUTH_LIMITS.maxPasswordFailures, now);
         throw new AppException(ErrorCode.UNAUTHORIZED, '当前密码不正确', HttpStatus.UNAUTHORIZED);
       }
     }
 
+    this.passwordFailures.delete(user.email);
     const passwordHash = await hashPassword(input.newPassword);
     const updated = await this.prisma.user.update({
       where: { id: userId },
       data: { passwordHash, passwordUpdatedAt: new Date() },
     });
+    // 改密后吊销已有长期刷新令牌，防止已泄露的旧设备继续静默续期
+    await this.prisma.refreshToken.updateMany({ where: { userId, revokedAt: null }, data: { revokedAt: new Date() } });
     return toUserProfile(updated);
   }
 
@@ -332,7 +341,7 @@ export class AuthService implements OnApplicationBootstrap, OnModuleDestroy {
     if (!this.env.INVITE_CODE || this.env.ADMIN_EMAILS.includes(email)) return;
     const existing = await this.prisma.user.findUnique({ where: { email }, select: { id: true } });
     if (existing) return;
-    if (!inviteCode || inviteCode.trim().toLowerCase() !== this.env.INVITE_CODE.toLowerCase()) {
+    if (!inviteCode || !safeEqualText(inviteCode.trim().toLowerCase(), this.env.INVITE_CODE.toLowerCase())) {
       throw new AppException(ErrorCode.FORBIDDEN, '新用户注册需要填写正确的校园邀请码', HttpStatus.FORBIDDEN);
     }
   }
@@ -357,15 +366,36 @@ export class AuthService implements OnApplicationBootstrap, OnModuleDestroy {
     if (consumed.count === 0) throw invalidCode();
   }
 
-  private recordPasswordFailure(email: string, now: number): void {
-    const prev = this.passwordFailures.get(email);
-    const nextCount = prev && prev.lockUntil <= now ? (prev.count >= AUTH_LIMITS.maxPasswordFailures ? 1 : prev.count + 1) : (prev?.count ?? 0) + 1;
-    const lockUntil = nextCount >= AUTH_LIMITS.maxPasswordFailures ? now + PASSWORD_LOCK_MS : 0;
-    if (this.passwordFailures.size >= MAX_LOCK_ENTRIES && !this.passwordFailures.has(email)) {
-      const oldest = this.passwordFailures.keys().next().value;
-      if (oldest !== undefined) this.passwordFailures.delete(oldest);
+  private assertNotPasswordLocked(
+    map: Map<string, { count: number; lockUntil: number }>,
+    key: string,
+    now: number,
+  ): void {
+    const fail = map.get(key);
+    if (fail && fail.lockUntil > now) {
+      const remainMin = Math.max(1, Math.ceil((fail.lockUntil - now) / 60_000));
+      throw new AppException(
+        ErrorCode.TOO_MANY_REQUESTS,
+        `密码错误次数过多，请 ${remainMin} 分钟后再试或改用邮箱验证码登录`,
+        HttpStatus.TOO_MANY_REQUESTS,
+      );
     }
-    this.passwordFailures.set(email, { count: nextCount, lockUntil });
+  }
+
+  private recordFailure(
+    map: Map<string, { count: number; lockUntil: number }>,
+    key: string,
+    limit: number,
+    now: number,
+  ): void {
+    const prev = map.get(key);
+    const nextCount = prev && prev.lockUntil <= now ? (prev.count >= limit ? 1 : prev.count + 1) : (prev?.count ?? 0) + 1;
+    const lockUntil = nextCount >= limit ? now + PASSWORD_LOCK_MS : 0;
+    if (map.size >= MAX_LOCK_ENTRIES && !map.has(key)) {
+      const oldest = map.keys().next().value;
+      if (oldest !== undefined) map.delete(oldest);
+    }
+    map.set(key, { count: nextCount, lockUntil });
   }
 
   async refresh(rawToken: string | undefined, userAgent?: string): Promise<IssuedSession> {

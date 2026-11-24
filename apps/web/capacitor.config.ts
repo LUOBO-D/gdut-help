@@ -9,8 +9,9 @@ const config: CapacitorConfig = {
   appName: 'GDUT Help',
   webDir: 'dist',
   android: {
-    // 只允许 HTTPS，不加载明文 http 内容
+    // 只允许 HTTPS，不加载明文 http 内容；生产构建禁止 WebView 远程调试
     allowMixedContent: false,
+    webContentsDebuggingEnabled: false,
   },
   plugins: {
     LocalNotifications: {

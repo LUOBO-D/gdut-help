@@ -1,4 +1,5 @@
 import { Body, Controller, Delete, Get, HttpCode, Param, Post, Put } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 import {
   courseSelectionInputSchema,
   courseSelectionSyncSchema,
@@ -22,6 +23,7 @@ export class CourseSelectionController {
   }
 
   @Post()
+  @Throttle({ default: { limit: 20, ttl: 60_000 } })
   create(
     @CurrentUser() user: AuthUser,
     @Body({ schema: courseSelectionInputSchema }) body: CourseSelectionInput,
@@ -30,6 +32,7 @@ export class CourseSelectionController {
   }
 
   @Put(':id')
+  @Throttle({ default: { limit: 30, ttl: 60_000 } })
   update(
     @CurrentUser() user: AuthUser,
     @Param('id', { schema: idParam }) id: string,
@@ -40,6 +43,7 @@ export class CourseSelectionController {
 
   @Post('sync')
   @HttpCode(200)
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
   sync(
     @CurrentUser() user: AuthUser,
     @Body({ schema: courseSelectionSyncSchema }) body: CourseSelectionSyncRequest,

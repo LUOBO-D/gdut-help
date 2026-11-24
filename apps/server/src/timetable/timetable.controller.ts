@@ -39,6 +39,7 @@ export class TimetableController {
 
   /** 基于全校已同步课表脱敏推算指定时段的空闲教室（零个人信息） */
   @Get('timetable/empty-rooms')
+  @Throttle({ default: { limit: 30, ttl: 60_000 } })
   emptyRooms(
     @Query({ schema: emptyRoomsQuerySchema }) q: z.output<typeof emptyRoomsQuerySchema>,
   ): Promise<EmptyRoomsInferenceResponse> {
@@ -67,6 +68,7 @@ export class TimetableController {
   /** 导入教务系统课表（前端解析、预览确认后提交） */
   @Post('timetable/import')
   @HttpCode(200)
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
   importCourses(
     @CurrentUser() user: AuthUser,
     @Body({ schema: timetableImportSchema }) body: z.output<typeof timetableImportSchema>,

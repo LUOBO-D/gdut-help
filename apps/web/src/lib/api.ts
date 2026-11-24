@@ -138,7 +138,10 @@ async function doRefresh(): Promise<boolean> {
 async function clearLocalSession(): Promise<void> {
   await setRefreshToken(null);
   useAuth.getState().clear();
-  if (isNative) await import('./local-reminders').then((m) => m.clearLocalReminders()).catch(() => undefined);
+  if (isNative) {
+    await import('./local-reminders').then((m) => m.clearLocalReminders()).catch(() => undefined);
+    await import('./gdut-auth').then((m) => m.disconnectGdutAuth()).catch(() => undefined);
+  }
   await import('./offline-queue').then((m) => m.clearOfflineQueue()).catch(() => undefined);
   const { clearQueryCache } = await import('./query-client');
   await clearQueryCache();

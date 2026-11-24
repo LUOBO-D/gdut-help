@@ -23,6 +23,13 @@ export function safeEqualHex(a: string, b: string): boolean {
   return ba.length === bb.length && timingSafeEqual(ba, bb);
 }
 
+/** 恒定时间比对任意字符串（经 SHA-256 定长摘要后比对，避免长度与时序侧信道泄露） */
+export function safeEqualText(a: string, b: string): boolean {
+  const ha = createHash('sha256').update(a).digest();
+  const hb = createHash('sha256').update(b).digest();
+  return timingSafeEqual(ha, hb);
+}
+
 export function generateRefreshToken(): string {
   return randomBytes(32).toString('base64url');
 }

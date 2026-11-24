@@ -16,3 +16,9 @@ apps/server/src/generated
 apps/server/ota-bundles/
 docker/ota-bundles/
 docker/backups/
+*.jks
+*.keystore
+*.p12
+*.apk
+keystore.properties
+apps/web/android/keystore.properties

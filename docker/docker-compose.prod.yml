@@ -5,6 +5,10 @@ services:
   postgres:
     image: postgres:16-alpine
     restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 512m
+    pids_limit: 128
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-gduthelp}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?请在 docker/.env.prod 中设置 POSTGRES_PASSWORD}
@@ -38,6 +42,12 @@ services:
       dockerfile: docker/Dockerfile
       target: runner
     restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    mem_limit: 512m
+    pids_limit: 256
     env_file:
       - .env.prod
     environment:

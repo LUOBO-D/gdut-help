@@ -13,10 +13,10 @@ import { getApiOrigin, isNative } from './platform';
 import { toast } from './toast-store';
 
 /** 当前前端资源包版本（由构建时 VITE_APP_VERSION 注入） */
-export const APP_BUNDLE_VERSION = (import.meta.env.VITE_APP_VERSION || '0.3.4').trim();
+export const APP_BUNDLE_VERSION = (import.meta.env.VITE_APP_VERSION || '0.3.12').trim();
 
 /** 当前安卓原生外壳 versionCode（与 android/app/build.gradle 保持同步） */
-export const NATIVE_APP_VERSION = 5;
+export const NATIVE_APP_VERSION = 6;
 
 const CHECK_INTERVAL_MS = 30 * 60_000;
 let initialized = false;
@@ -167,8 +167,8 @@ export async function applyPendingOtaUpdate(): Promise<void> {
   if (store.phase === 'downloading' || store.phase === 'applying') return;
 
   if (pending.needsNativeUpgrade) {
-    if (!pending.apkUrl) {
-      store.setPhase('error', { error: '此版本包含底层能力升级，请联系管理员获取新版安装包' });
+    if (!pending.apkUrl || !pending.apkUrl.startsWith('https://')) {
+      store.setPhase('error', { error: '此版本包含安全架构升级，请使用 HTTPS 官方地址获取新版安装包' });
       return;
     }
     try {
