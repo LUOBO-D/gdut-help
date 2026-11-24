@@ -9,14 +9,13 @@ import {
   useOtaStore,
   type PendingOtaUpdate,
 } from './ota-store';
-import { getApiOrigin, isNative } from './platform';
+import { getApiOrigin, isNative, NATIVE_APP_VERSION } from './platform';
 import { toast } from './toast-store';
 
 /** 当前前端资源包版本（由构建时 VITE_APP_VERSION 注入） */
-export const APP_BUNDLE_VERSION = (import.meta.env.VITE_APP_VERSION || '0.3.12').trim();
+export const APP_BUNDLE_VERSION = (import.meta.env.VITE_APP_VERSION || '0.3.13').trim();
 
-/** 当前安卓原生外壳 versionCode（与 android/app/build.gradle 保持同步） */
-export const NATIVE_APP_VERSION = 6;
+export { NATIVE_APP_VERSION };
 
 const CHECK_INTERVAL_MS = 30 * 60_000;
 let initialized = false;
@@ -122,13 +121,19 @@ export async function checkForOtaUpdate(options: { interactive?: boolean } = {})
   try {
     const current = await resolveCurrentVersion();
     const res = await api<AppUpdateCheckResponse>('/app/update');
+    if (res.apkSha256) {
+      useOtaStore.getState().setLatestApkSha256(res.apkSha256);
+    }
     const latest = res.latest;
-    if (!latest || compareSemver(latest.version, current.bundleVersion) <= 0) {
+    const minSupported = res.minSupportedNativeVersion ?? 0;
+    const forcedByServer = minSupported > NATIVE_APP_VERSION;
+    if (!latest || (!forcedByServer && compareSemver(latest.version, current.bundleVersion) <= 0)) {
       useOtaStore.getState().setAvailable(null);
       return { status: 'up-to-date', currentVersion: current.bundleVersion };
     }
 
-    const needsNativeUpgrade = latest.minNativeVersion > NATIVE_APP_VERSION;
+    const needsNativeUpgrade = latest.minNativeVersion > NATIVE_APP_VERSION || forcedByServer;
+    const forceUpgrade = needsNativeUpgrade && Boolean(latest.forceUpgrade || forcedByServer);
     const downloadUrl = resolveDownloadUrl(res);
     const apkUrl = resolveApkUrl(res);
 
@@ -147,9 +152,10 @@ export async function checkForOtaUpdate(options: { interactive?: boolean } = {})
       downloadUrl: needsNativeUpgrade ? null : downloadUrl,
       apkUrl,
       needsNativeUpgrade,
+      forceUpgrade,
     };
 
-    const shouldPrompt = interactive || getDismissedOtaVersion() !== latest.version;
+    const shouldPrompt = forceUpgrade || interactive || getDismissedOtaVersion() !== latest.version;
     useOtaStore.getState().setAvailable(update, { openModal: shouldPrompt });
     return { status: 'available', update, prompted: shouldPrompt };
   } catch (err) {

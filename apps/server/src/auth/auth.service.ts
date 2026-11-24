@@ -27,6 +27,13 @@ import {
 } from './token.util.js';
 import { UserGuardCacheService } from './user-guard-cache.service.js';
 import { ActiveDefenseService } from '../security/active-defense.service.js';
+import { SecurityAuditService } from '../security/security-audit.service.js';
+
+export interface SessionMeta {
+  userAgent?: string;
+  ip?: string;
+  nativeVersion?: number;
+}
 
 export const JWT_ISSUER = 'gduthelp';
 
@@ -100,6 +107,7 @@ export class AuthService implements OnApplicationBootstrap, OnModuleDestroy {
     @Inject(ENV) private readonly env: Env,
     @Optional() private readonly guardCache?: UserGuardCacheService,
     @Optional() private readonly defense?: ActiveDefenseService,
+    @Optional() private readonly audit?: SecurityAuditService,
   ) {}
 
   getAuthConfig(): AuthConfig {
@@ -201,7 +209,14 @@ export class AuthService implements OnApplicationBootstrap, OnModuleDestroy {
     return { cooldownSeconds: AUTH_LIMITS.resendCooldownSeconds };
   }
 
-  async loginWithEmailCode(rawEmail: string, code: string, userAgent?: string, inviteCode?: string): Promise<IssuedSession> {
+  async loginWithEmailCode(
+    rawEmail: string,
+    code: string,
+    userAgent?: string,
+    inviteCode?: string,
+    ip?: string,
+    nativeVersion?: number,
+  ): Promise<IssuedSession> {
     const email = rawEmail.trim().toLowerCase();
     this.assertEmailDomainAllowed(email);
     await this.assertInviteCodeIfNew(email, inviteCode);
@@ -210,10 +225,17 @@ export class AuthService implements OnApplicationBootstrap, OnModuleDestroy {
     const user = await this.findOrCreateUser(email);
     if (user.status === 'banned') throw banned();
     this.passwordFailures.delete(email);
-    return this.issueSession(user, userAgent);
+    this.audit?.log({ event: 'login_email', userId: user.id, ip, userAgent, path: '/api/v1/auth/login' });
+    return this.issueSession(user, { userAgent, ip, nativeVersion });
   }
 
-  async loginWithPassword(rawEmail: string, password: string, userAgent?: string, ip?: string): Promise<IssuedSession> {
+  async loginWithPassword(
+    rawEmail: string,
+    password: string,
+    userAgent?: string,
+    ip?: string,
+    nativeVersion?: number,
+  ): Promise<IssuedSession> {
     const email = rawEmail.trim().toLowerCase();
     this.assertEmailDomainAllowed(email);
 
@@ -231,6 +253,16 @@ export class AuthService implements OnApplicationBootstrap, OnModuleDestroy {
         this.recordFailure(this.ipPasswordFailures, ip, AUTH_LIMITS.maxPasswordFailuresPerIp, now);
         this.defense?.recordIncident(ip, 'auth_failure', '/api/v1/auth/login/password');
       }
+      if (user) {
+        this.audit?.log({
+          event: 'login_failed',
+          severity: 'warn',
+          userId: user.id,
+          ip,
+          userAgent,
+          path: '/api/v1/auth/login/password',
+        });
+      }
       throw invalidPassword();
     }
     if (user.status === 'banned') throw banned();
@@ -241,12 +273,15 @@ export class AuthService implements OnApplicationBootstrap, OnModuleDestroy {
       this.env.ADMIN_EMAILS.includes(email) && user.role !== 'admin'
         ? await this.prisma.user.update({ where: { id: user.id }, data: { role: 'admin' } })
         : user;
-    return this.issueSession(promoted, userAgent);
+    this.audit?.log({ event: 'login_password', userId: promoted.id, ip, userAgent, path: '/api/v1/auth/login/password' });
+    return this.issueSession(promoted, { userAgent, ip, nativeVersion });
   }
 
   async registerWithPassword(
     input: { email: string; code: string; password: string; nickname?: string; inviteCode?: string },
     userAgent?: string,
+    ip?: string,
+    nativeVersion?: number,
   ): Promise<IssuedSession> {
     const email = input.email.trim().toLowerCase();
     this.assertEmailDomainAllowed(email);
@@ -282,10 +317,11 @@ export class AuthService implements OnApplicationBootstrap, OnModuleDestroy {
     }
 
     this.passwordFailures.delete(email);
-    return this.issueSession(user, userAgent);
+    this.audit?.log({ event: 'register', userId: user.id, ip, userAgent, path: '/api/v1/auth/register' });
+    return this.issueSession(user, { userAgent, ip, nativeVersion });
   }
 
-  async resetPassword(input: { email: string; code: string; newPassword: string }): Promise<void> {
+  async resetPassword(input: { email: string; code: string; newPassword: string }, ip?: string, userAgent?: string): Promise<void> {
     const email = input.email.trim().toLowerCase();
     this.assertEmailDomainAllowed(email);
     await this.verifyAndConsumeEmailCode(email, input.code);
@@ -302,11 +338,21 @@ export class AuthService implements OnApplicationBootstrap, OnModuleDestroy {
     this.passwordFailures.delete(email);
     // 重置密码后立即吊销该账号所有旧设备会话
     await this.revokeAllForUser(user.id);
+    this.audit?.log({
+      event: 'password_reset',
+      severity: 'warn',
+      userId: user.id,
+      ip,
+      userAgent,
+      path: '/api/v1/auth/password/reset',
+    });
   }
 
   async changePassword(
     userId: string,
     input: { currentPassword?: string; newPassword: string },
+    ip?: string,
+    userAgent?: string,
   ): Promise<UserProfile> {
     const user = await this.prisma.user.findUnique({ where: { id: userId } });
     if (!user) throw new AppException(ErrorCode.UNAUTHORIZED, '账号不存在', HttpStatus.UNAUTHORIZED);
@@ -334,6 +380,14 @@ export class AuthService implements OnApplicationBootstrap, OnModuleDestroy {
     });
     // 改密后吊销已有长期刷新令牌，防止已泄露的旧设备继续静默续期
     await this.prisma.refreshToken.updateMany({ where: { userId, revokedAt: null }, data: { revokedAt: new Date() } });
+    this.audit?.log({
+      event: 'password_changed',
+      severity: 'warn',
+      userId,
+      ip,
+      userAgent,
+      path: '/api/v1/auth/password/change',
+    });
     return toUserProfile(updated);
   }
 
@@ -412,7 +466,12 @@ export class AuthService implements OnApplicationBootstrap, OnModuleDestroy {
     map.set(key, { count: nextCount, lockUntil });
   }
 
-  async refresh(rawToken: string | undefined, userAgent?: string): Promise<IssuedSession> {
+  async refresh(
+    rawToken: string | undefined,
+    userAgent?: string,
+    ip?: string,
+    nativeVersion?: number,
+  ): Promise<IssuedSession> {
     if (!rawToken) throw invalidRefresh();
     const stored = await this.prisma.refreshToken.findUnique({
       where: { tokenHash: hashRefreshToken(rawToken) },
@@ -426,6 +485,14 @@ export class AuthService implements OnApplicationBootstrap, OnModuleDestroy {
         // 已轮换的令牌被再次使用，可能已泄露：吊销该用户的全部令牌
         this.logger.warn(`检测到刷新令牌重复使用，吊销用户 ${stored.userId} 的全部会话`);
         await this.revokeAllForUser(stored.userId);
+        this.audit?.log({
+          event: 'token_reuse_detected',
+          severity: 'critical',
+          userId: stored.userId,
+          ip,
+          userAgent,
+          path: '/api/v1/auth/refresh',
+        });
         throw invalidRefresh();
       }
       throw new RefreshRaceException();
@@ -442,7 +509,11 @@ export class AuthService implements OnApplicationBootstrap, OnModuleDestroy {
     });
     if (rotated.count === 0) throw new RefreshRaceException();
 
-    return this.issueSession(stored.user, userAgent);
+    return this.issueSession(stored.user, {
+      userAgent,
+      ip,
+      nativeVersion: nativeVersion ?? stored.nativeVersion ?? undefined,
+    });
   }
 
   async logout(rawToken: string | undefined): Promise<void> {
@@ -454,12 +525,21 @@ export class AuthService implements OnApplicationBootstrap, OnModuleDestroy {
   }
 
   /** 退出该账号在全部设备上的登录，并立即令已有 access token 失效 */
-  async logoutAll(userId: string): Promise<LogoutAllResult> {
+  async logoutAll(userId: string, ip?: string, userAgent?: string): Promise<LogoutAllResult> {
     const res = await this.prisma.refreshToken.updateMany({
       where: { userId, revokedAt: null },
       data: { revokedAt: new Date() },
     });
     this.guardCache?.markRevokedNow(userId);
+    this.audit?.log({
+      event: 'logout_all',
+      severity: 'info',
+      userId,
+      ip,
+      userAgent,
+      path: '/api/v1/auth/logout-all',
+      detail: { revokedCount: res.count },
+    });
     return { revokedCount: res.count };
   }
 
@@ -492,7 +572,7 @@ export class AuthService implements OnApplicationBootstrap, OnModuleDestroy {
     return existing;
   }
 
-  private async issueSession(user: User, userAgent?: string): Promise<IssuedSession> {
+  private async issueSession(user: User, meta: SessionMeta = {}): Promise<IssuedSession> {
     const payload: AccessTokenPayload = { sub: user.id, role: user.role };
     const accessToken = await this.jwt.signAsync(payload, {
       expiresIn: AUTH_LIMITS.accessTokenSeconds,
@@ -506,7 +586,9 @@ export class AuthService implements OnApplicationBootstrap, OnModuleDestroy {
       data: {
         userId: user.id,
         tokenHash: hashRefreshToken(refreshToken),
-        userAgent: userAgent?.slice(0, 255),
+        userAgent: meta.userAgent?.slice(0, 255),
+        ip: meta.ip && meta.ip !== 'unknown' ? meta.ip.slice(0, 64) : undefined,
+        nativeVersion: meta.nativeVersion,
         expiresAt: refreshExpiresAt,
       },
     });

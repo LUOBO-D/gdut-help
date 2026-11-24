@@ -8,6 +8,9 @@ export const isNative: boolean =
   typeof window !== 'undefined' &&
   Boolean((window as { Capacitor?: { isNativePlatform?: () => boolean } }).Capacitor?.isNativePlatform?.());
 
+/** 当前安卓原生外壳 versionCode（与 android/app/build.gradle 保持同步） */
+export const NATIVE_APP_VERSION = 7;
+
 const API_ORIGIN_KEY = 'gduthelp-api-origin';
 
 /** 打包时写入的默认后端地址（网页端为空，使用同源相对路径） */

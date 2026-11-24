@@ -4,6 +4,7 @@ import { StandardSchemaValidationPipe } from '@nestjs/common';
 import { HttpAdapterHost } from '@nestjs/core';
 import type { NestExpressApplication } from '@nestjs/platform-express';
 import type { NextFunction, Request, Response } from 'express';
+import { setTrustCfHeaders } from './common/client-ip.js';
 import { HttpExceptionFilter } from './common/http-exception.filter.js';
 import { RequestLoggingInterceptor } from './common/request-logging.interceptor.js';
 import { ResponseInterceptor } from './common/response.interceptor.js';
@@ -19,6 +20,7 @@ export function configureApp(app: NestExpressApplication, env: Env) {
 
   // 只信任本机反向代理（Vite 开发代理、Nginx、Caddy、tailscale serve）提供的 X-Forwarded-For
   app.set('trust proxy', 'loopback');
+  setTrustCfHeaders(env.TRUST_CF_HEADERS);
   app.disable('x-powered-by');
   let defense: ActiveDefenseService | undefined;
   try {
@@ -35,7 +37,7 @@ export function configureApp(app: NestExpressApplication, env: Env) {
     app.enableCors({
       origin: env.CORS_ORIGINS,
       methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-      allowedHeaders: ['Authorization', 'Content-Type', 'Accept', 'X-Client', 'X-Request-Id'],
+      allowedHeaders: ['Authorization', 'Content-Type', 'Accept', 'X-Client', 'X-Native-Version', 'X-Request-Id'],
       exposedHeaders: ['X-Request-Id'],
       maxAge: 600,
     });

@@ -134,6 +134,31 @@ export interface LogoutAllResult {
   revokedCount: number;
 }
 
+export interface UserSessionInfo {
+  id: string;
+  deviceLabel: string;
+  platform: 'android' | 'ios' | 'desktop' | 'web';
+  ipMasked: string | null;
+  nativeVersion: number | null;
+  createdAt: string;
+  expiresAt: string;
+}
+
+export interface UserSecurityEvent {
+  id: string;
+  event: string;
+  label: string;
+  severity: 'info' | 'warn' | 'critical';
+  ipMasked: string | null;
+  deviceLabel: string | null;
+  createdAt: string;
+}
+
+export interface UserSecurityOverview {
+  activeSessions: UserSessionInfo[];
+  recentEvents: UserSecurityEvent[];
+}
+
 export const deleteAccountSchema = z.object({
   confirmEmail: email,
 });

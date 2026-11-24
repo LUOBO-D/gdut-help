@@ -22,3 +22,5 @@ docker/backups/
 *.apk
 keystore.properties
 apps/web/android/keystore.properties
+docker/.backup-passphrase
+*.sql.gz.enc

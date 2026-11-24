@@ -70,6 +70,7 @@ model User {
   courseReviewLikes     CourseReviewLike[]
   cetRecords            CetRecord[]
   selectionReminders    CourseSelectionReminder[]
+  securityAuditLogs     SecurityAuditLog[]
 
   @@map("users")
 }
@@ -92,13 +93,15 @@ model EmailCode {
 
 /// 刷新令牌。只保存 SHA-256 摘要；每次刷新都轮换，旧令牌被再次使用时吊销该用户全部令牌。
 model RefreshToken {
-  id         String    @id @default(uuid()) @db.Uuid
-  userId     String    @map("user_id") @db.Uuid
-  tokenHash  String    @unique @map("token_hash")
-  userAgent  String?   @map("user_agent")
-  expiresAt  DateTime  @map("expires_at") @db.Timestamptz
-  revokedAt  DateTime? @map("revoked_at") @db.Timestamptz
-  createdAt  DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  id            String    @id @default(uuid()) @db.Uuid
+  userId        String    @map("user_id") @db.Uuid
+  tokenHash     String    @unique @map("token_hash")
+  userAgent     String?   @map("user_agent")
+  ip            String?
+  nativeVersion Int?      @map("native_version") @db.SmallInt
+  expiresAt     DateTime  @map("expires_at") @db.Timestamptz
+  revokedAt     DateTime? @map("revoked_at") @db.Timestamptz
+  createdAt     DateTime  @default(now()) @map("created_at") @db.Timestamptz
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
@@ -846,4 +849,51 @@ model CourseSelectionReminder {
 
   @@index([userId, startAt])
   @@map("course_selection_reminders")
+}
+
+enum SecuritySeverity {
+  info
+  warn
+  critical
+}
+
+enum SecurityBanKind {
+  ip
+  subnet
+}
+
+/// 安全审计日志（记录登录、改密、登出、注销、蜜罐诱捕、隔离封禁、管理员操作等关键事件，默认保留 90 天）
+model SecurityAuditLog {
+  id        String           @id @default(uuid()) @db.Uuid
+  userId    String?          @map("user_id") @db.Uuid
+  event     String
+  severity  SecuritySeverity @default(info)
+  ip        String?
+  userAgent String?          @map("user_agent")
+  path      String?
+  detail    Json?
+  createdAt DateTime         @default(now()) @map("created_at") @db.Timestamptz
+
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([createdAt])
+  @@index([userId, createdAt])
+  @@index([event, createdAt])
+  @@map("security_audit_logs")
+}
+
+/// 持久化安全封禁名单（高危 IP 与 /24 网段封禁落库，确保容器重启后防护不丢失）
+model SecurityBan {
+  id        String          @id @default(uuid()) @db.Uuid
+  target    String          @unique
+  kind      SecurityBanKind
+  reason    String
+  score     Int             @default(100)
+  banCount  Int             @default(1) @map("ban_count") @db.SmallInt
+  expiresAt DateTime        @map("expires_at") @db.Timestamptz
+  createdAt DateTime        @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt DateTime        @updatedAt @map("updated_at") @db.Timestamptz
+
+  @@index([expiresAt])
+  @@map("security_bans")
 }

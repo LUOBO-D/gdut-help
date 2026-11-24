@@ -16,6 +16,7 @@ export const ErrorCode = {
   EMAIL_CODE_DAILY_LIMIT: 'EMAIL_CODE_DAILY_LIMIT',
   EMAIL_CODE_INVALID: 'EMAIL_CODE_INVALID',
   REFRESH_TOKEN_INVALID: 'REFRESH_TOKEN_INVALID',
+  CLIENT_UPGRADE_REQUIRED: 'CLIENT_UPGRADE_REQUIRED',
   INTERNAL_ERROR: 'INTERNAL_ERROR',
 } as const;
 
@@ -24,3 +25,6 @@ export type ErrorCode = (typeof ErrorCode)[keyof typeof ErrorCode];
 /** App 发请求时带上 `X-Client: native`，服务端改为在响应体里返回 refresh token（见 AuthSession.refreshToken） */
 export const NATIVE_CLIENT_HEADER = 'x-client';
 export const NATIVE_CLIENT_VALUE = 'native';
+
+/** 原生外壳版本号请求头（如 `X-Native-Version: 7`），供服务端识别并逐步强制淘汰不安全的旧版 Debug 安装包 */
+export const NATIVE_VERSION_HEADER = 'x-native-version';

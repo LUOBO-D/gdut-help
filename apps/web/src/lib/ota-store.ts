@@ -9,6 +9,8 @@ export interface PendingOtaUpdate {
   downloadUrl: string | null;
   apkUrl: string | null;
   needsNativeUpgrade: boolean;
+  /** 安全强制升级：为 true 时弹窗不可关闭，禁止跳过继续使用存在漏洞的旧测试包 */
+  forceUpgrade?: boolean;
 }
 
 export type OtaUpdatePhase = 'idle' | 'downloading' | 'applying' | 'error';
@@ -16,6 +18,8 @@ export type OtaUpdatePhase = 'idle' | 'downloading' | 'applying' | 'error';
 interface OtaStoreState {
   /** 服务端检测到的可用新版本（即使用户点了「暂不更新」也会保留，便于在「我的」页随时点击升级） */
   available: PendingOtaUpdate | null;
+  /** 服务端公开的最新正式签名 APK SHA-256 指纹（用于安全中心透明校验） */
+  latestApkSha256: string | null;
   /** 更新说明弹窗是否显示 */
   open: boolean;
   phase: OtaUpdatePhase;
@@ -23,6 +27,7 @@ interface OtaStoreState {
   progress: number;
   error: string | null;
   setAvailable: (update: PendingOtaUpdate | null, options?: { openModal?: boolean }) => void;
+  setLatestApkSha256: (sha256: string | null) => void;
   openModal: () => void;
   closeModal: () => void;
   dismissCurrent: () => void;
@@ -56,10 +61,15 @@ export function clearDismissedOtaVersion(): void {
 
 export const useOtaStore = create<OtaStoreState>((set, get) => ({
   available: null,
+  latestApkSha256: null,
   open: false,
   phase: 'idle',
   progress: 0,
   error: null,
+
+  setLatestApkSha256: (sha256) => {
+    set({ latestApkSha256: sha256 });
+  },
 
   setAvailable: (update, options) => {
     const state = get();
@@ -70,7 +80,7 @@ export const useOtaStore = create<OtaStoreState>((set, get) => ({
     const busy = state.phase === 'downloading' || state.phase === 'applying';
     set({
       available: update,
-      open: options?.openModal ? true : state.open,
+      open: update.forceUpgrade || options?.openModal ? true : state.open,
       ...(busy ? {} : { phase: 'idle', progress: 0, error: null }),
     });
   },
@@ -87,13 +97,13 @@ export const useOtaStore = create<OtaStoreState>((set, get) => ({
 
   closeModal: () => {
     const state = get();
-    if (state.phase === 'downloading' || state.phase === 'applying') return;
+    if (state.phase === 'downloading' || state.phase === 'applying' || state.available?.forceUpgrade) return;
     set({ open: false, phase: 'idle', error: null });
   },
 
   dismissCurrent: () => {
     const state = get();
-    if (state.phase === 'downloading' || state.phase === 'applying') return;
+    if (state.phase === 'downloading' || state.phase === 'applying' || state.available?.forceUpgrade) return;
     if (state.available) {
       setDismissedOtaVersion(state.available.latest.version);
     }

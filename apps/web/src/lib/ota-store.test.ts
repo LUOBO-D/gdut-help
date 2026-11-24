@@ -81,4 +81,14 @@ describe('useOtaStore', () => {
     expect(useOtaStore.getState().progress).toBe(42);
     expect(getDismissedOtaVersion()).toBeNull();
   });
+
+  it('prevents dismissing or closing when forceUpgrade is active', () => {
+    useOtaStore.getState().setAvailable({ ...sampleUpdate, needsNativeUpgrade: true, forceUpgrade: true });
+    expect(useOtaStore.getState().open).toBe(true);
+
+    useOtaStore.getState().dismissCurrent();
+    useOtaStore.getState().closeModal();
+    expect(useOtaStore.getState().open).toBe(true);
+    expect(getDismissedOtaVersion()).toBeNull();
+  });
 });

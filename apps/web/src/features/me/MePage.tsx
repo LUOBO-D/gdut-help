@@ -1,13 +1,9 @@
 import {
-  changePasswordSchema,
   computeGpaSummary,
   defaultAcademicYear,
-  deleteAccountSchema,
   evaluateFitnessRecord,
   FITNESS_LEVEL_LABELS,
-  today,
   updateProfileSchema,
-  type UserDataExport,
   type UserProfile,
 } from '@gduthelp/shared';
 import { motion } from 'motion/react';
@@ -19,10 +15,10 @@ import { GlassCard } from '../../components/GlassCard';
 import { PageHeader } from '../../components/PageHeader';
 import { Sheet } from '../../components/Sheet';
 import { ChevronRightIcon } from '../../components/icons';
-import { api, ApiError, deleteAccount, logout, logoutAll } from '../../lib/api';
+import { ApiError, logout } from '../../lib/api';
 import { useAuth } from '../../lib/auth-store';
 import { useOtaStore } from '../../lib/ota-store';
-import { DEFAULT_API_ORIGIN, getApiOrigin, isNative, normalizeApiOrigin, setApiOriginOverride } from '../../lib/platform';
+import { DEFAULT_API_ORIGIN, getApiOrigin, isNative, NATIVE_APP_VERSION, normalizeApiOrigin, setApiOriginOverride } from '../../lib/platform';
 import { useCurrentFitness, useGrades, usePreferences } from '../../lib/queries';
 import {
   SCENE_STYLES,
@@ -37,6 +33,7 @@ import { toast } from '../../lib/toast-store';
 import { useUi } from '../../lib/ui-store';
 import { pressable, spring } from '../../motion/presets';
 import { PreferencesSheet } from '../food/PreferencesSheet';
+import { AccountSecurityCard } from './AccountSecurityCenter';
 import { CampusPicker } from './CampusPicker';
 import { DisplaySettings } from './DisplaySettings';
 import { GdutAuthCard } from './GdutAuthCard';
@@ -156,242 +153,6 @@ export function MePage() {
         </section>
       </div>
       <PreferencesSheet open={prefOpen} onClose={() => setPrefOpen(false)} initial={pref} />
-    </>
-  );
-}
-
-/** 账号安全与个人数据自主权：登录密码、JSON 导出备份、退出全部设备、二次确认注销账号 */
-function AccountSecurityCard({
-  email,
-  hasPassword,
-  onLoggedOut,
-}: {
-  email: string;
-  hasPassword: boolean;
-  onLoggedOut: () => void;
-}) {
-  const setUser = useAuth((s) => s.setUser);
-  const [exporting, setExporting] = useState(false);
-  const [loggingOutAll, setLoggingOutAll] = useState(false);
-  const [pwdOpen, setPwdOpen] = useState(false);
-  const [currentPassword, setCurrentPassword] = useState('');
-  const [newPassword, setNewPassword] = useState('');
-  const [savingPwd, setSavingPwd] = useState(false);
-  const [pwdError, setPwdError] = useState<string | null>(null);
-  const [deleteOpen, setDeleteOpen] = useState(false);
-  const [confirmEmail, setConfirmEmail] = useState('');
-  const [deleting, setDeleting] = useState(false);
-  const [deleteError, setDeleteError] = useState<string | null>(null);
-
-  const handleSavePassword = async (e: FormEvent) => {
-    e.preventDefault();
-    const parsed = changePasswordSchema.safeParse({
-      currentPassword: hasPassword ? currentPassword : undefined,
-      newPassword,
-    });
-    if (!parsed.success) {
-      setPwdError(parsed.error.issues[0]?.message ?? '请检查输入的密码');
-      return;
-    }
-    if (hasPassword && !currentPassword) {
-      setPwdError('请输入当前登录密码');
-      return;
-    }
-    setSavingPwd(true);
-    setPwdError(null);
-    try {
-      const updated = await api<UserProfile>('/auth/password/change', { method: 'POST', body: parsed.data });
-      setUser(updated);
-      toast.success(hasPassword ? '登录密码已修改' : '已设置登录密码，下次可直接用密码登录');
-      setPwdOpen(false);
-      setCurrentPassword('');
-      setNewPassword('');
-    } catch (err) {
-      setPwdError(err instanceof ApiError ? err.message : '保存密码失败');
-    } finally {
-      setSavingPwd(false);
-    }
-  };
-
-  const handleExport = async () => {
-    setExporting(true);
-    try {
-      const data = await api<UserDataExport>('/me/export');
-      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `gduthelp-export-${today()}.json`;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      URL.revokeObjectURL(url);
-      toast.success('已导出个人数据备份');
-    } catch (err) {
-      toast.error(err instanceof ApiError ? err.message : '导出数据失败');
-    } finally {
-      setExporting(false);
-    }
-  };
-
-  const handleLogoutAll = async () => {
-    setLoggingOutAll(true);
-    try {
-      const res = await logoutAll();
-      toast.success(`已退出全部设备（吊销 ${res.revokedCount} 个会话）`);
-      onLoggedOut();
-    } catch {
-      onLoggedOut();
-    } finally {
-      setLoggingOutAll(false);
-    }
-  };
-
-  const handleDelete = async (e: FormEvent) => {
-    e.preventDefault();
-    const parsed = deleteAccountSchema.safeParse({ confirmEmail });
-    if (!parsed.success) {
-      setDeleteError(parsed.error.issues[0]?.message ?? '请输入有效的邮箱');
-      return;
-    }
-    if (parsed.data.confirmEmail !== email.toLowerCase()) {
-      setDeleteError('输入的邮箱与当前账号不一致');
-      return;
-    }
-    setDeleting(true);
-    setDeleteError(null);
-    try {
-      await deleteAccount(parsed.data.confirmEmail);
-      toast.info('账号已永久注销');
-      setDeleteOpen(false);
-      onLoggedOut();
-    } catch (err) {
-      setDeleteError(err instanceof ApiError ? err.message : '注销失败，请稍后重试');
-    } finally {
-      setDeleting(false);
-    }
-  };
-
-  return (
-    <>
-      <GlassCard className="p-5">
-        <h2 className="text-[15px] font-semibold">账号安全与数据</h2>
-        <p className="mt-1 text-sm text-fg-muted">支持设置登录密码、随时备份个人数据或清理其他设备的登录状态</p>
-        <div className="mt-3.5 grid gap-2 sm:grid-cols-3">
-          <Button
-            variant="ghost"
-            className="h-10 text-sm"
-            onClick={() => {
-              setCurrentPassword('');
-              setNewPassword('');
-              setPwdError(null);
-              setPwdOpen(true);
-            }}
-          >
-            {hasPassword ? '修改登录密码' : '设置登录密码'}
-          </Button>
-          <Button variant="ghost" className="h-10 text-sm" loading={exporting} onClick={() => void handleExport()}>
-            导出数据 (JSON)
-          </Button>
-          <Button variant="ghost" className="h-10 text-sm" loading={loggingOutAll} onClick={() => void handleLogoutAll()}>
-            退出全部设备
-          </Button>
-        </div>
-        <div className="mt-3 border-t border-current/10 pt-3">
-          <button
-            type="button"
-            onClick={() => {
-              setConfirmEmail('');
-              setDeleteError(null);
-              setDeleteOpen(true);
-            }}
-            className="text-xs font-medium text-danger hover:underline"
-          >
-            永久注销账号并清空个人数据…
-          </button>
-        </div>
-      </GlassCard>
-
-      <Sheet open={pwdOpen} onClose={() => setPwdOpen(false)} title={hasPassword ? '修改登录密码' : '设置登录密码'}>
-        <form onSubmit={(e) => void handleSavePassword(e)} className="space-y-4 pb-2">
-          <p className="text-sm text-fg-muted">
-            {hasPassword
-              ? '修改后可直接用新密码在手机 App 或网页端登录。'
-              : '设置密码后，之后登录不用每次收邮箱验证码，在 App 端切换设备也更方便。'}
-          </p>
-          {hasPassword && (
-            <Field label="当前密码">
-              <input
-                className="field"
-                type="password"
-                autoComplete="current-password"
-                value={currentPassword}
-                onChange={(e) => {
-                  setCurrentPassword(e.target.value);
-                  setPwdError(null);
-                }}
-              />
-            </Field>
-          )}
-          <Field label="新密码（至少 8 位）">
-            <input
-              className="field"
-              type="password"
-              autoComplete="new-password"
-              value={newPassword}
-              onChange={(e) => {
-                setNewPassword(e.target.value);
-                setPwdError(null);
-              }}
-              placeholder="建议字母与数字组合"
-            />
-          </Field>
-          {pwdError && <p className="text-sm text-danger">{pwdError}</p>}
-          <div className="flex gap-2">
-            <Button variant="ghost" type="button" className="flex-1" onClick={() => setPwdOpen(false)}>
-              取消
-            </Button>
-            <Button type="submit" className="flex-1" loading={savingPwd}>
-              保存密码
-            </Button>
-          </div>
-        </form>
-      </Sheet>
-
-      <Sheet open={deleteOpen} onClose={() => setDeleteOpen(false)} title="永久注销账号">
-        <form onSubmit={(e) => void handleDelete(e)} className="space-y-4 pb-2">
-          <p className="text-sm leading-relaxed text-fg-muted">
-            注销后将永久删除你的课表、待办、提醒、心情、口味偏好与评价记录，且无法恢复。建议先点击「导出我的数据」留存备份。
-          </p>
-          <Field label={`请输入当前账号邮箱 ${email} 以确认`}>
-            <input
-              className="field"
-              type="email"
-              value={confirmEmail}
-              onChange={(e) => {
-                setConfirmEmail(e.target.value);
-                setDeleteError(null);
-              }}
-              placeholder={email}
-              autoComplete="off"
-            />
-          </Field>
-          {deleteError && <p className="text-sm text-danger">{deleteError}</p>}
-          <div className="flex gap-2">
-            <Button variant="ghost" type="button" className="flex-1" onClick={() => setDeleteOpen(false)}>
-              取消
-            </Button>
-            <Button
-              type="submit"
-              className="flex-1 bg-danger! text-white!"
-              disabled={confirmEmail.trim().toLowerCase() !== email.toLowerCase()}
-              loading={deleting}
-            >
-              确认永久注销
-            </Button>
-          </div>
-        </form>
-      </Sheet>
     </>
   );
 }
@@ -624,7 +385,7 @@ function AppUpdateCard() {
               )}
             </div>
             <p className="mt-1 text-sm text-fg-muted">
-              当前版本 v{info?.bundleVersion ?? '…'}（外壳 v{info?.nativeVersion ?? 5}
+              当前版本 v{info?.bundleVersion ?? '…'}（外壳 v{info?.nativeVersion ?? NATIVE_APP_VERSION}
               {info?.isOtaActive ? ' · 已热更新' : ''}）
             </p>
             {origin && <p className="mt-1 truncate text-xs text-fg-muted">后端：{origin}</p>}

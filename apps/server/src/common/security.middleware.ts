@@ -1,5 +1,11 @@
 import { randomUUID } from 'node:crypto';
 import { Logger } from '@nestjs/common';
+import {
+  ErrorCode,
+  NATIVE_CLIENT_HEADER,
+  NATIVE_CLIENT_VALUE,
+  NATIVE_VERSION_HEADER,
+} from '@gduthelp/shared';
 import type { NextFunction, Request, Response } from 'express';
 import type { ActiveDefenseService } from '../security/active-defense.service.js';
 import { clientIp } from './client-ip.js';
@@ -115,7 +121,29 @@ export function createSecurityMiddleware(
       return;
     }
 
-    // 4. 焦油坑受控减速
+    // 4. 旧版不安全原生外壳强制淘汰门禁（永远放行 /health 与 /app/* 保证旧包可检查并下载新版 APK）
+    const minNative = defense?.getMinNativeVersion() ?? 0;
+    if (
+      minNative > 0 &&
+      req.header(NATIVE_CLIENT_HEADER) === NATIVE_CLIENT_VALUE &&
+      pathname.startsWith('/api/v1/') &&
+      !pathname.startsWith('/api/v1/app/') &&
+      pathname !== '/api/v1/health'
+    ) {
+      const rawVer = req.header(NATIVE_VERSION_HEADER);
+      const clientVer = rawVer ? Number.parseInt(rawVer, 10) : 0;
+      if (!Number.isFinite(clientVer) || clientVer < minNative) {
+        res.setHeader('Cache-Control', 'no-store');
+        res.status(426).json({
+          code: ErrorCode.CLIENT_UPGRADE_REQUIRED,
+          data: { minNativeVersion: minNative, apkPath: '/api/v1/app/apk/latest' },
+          message: '当前旧版安装包已停止服务，请先卸载旧版再安装最新正式安全版',
+        });
+        return;
+      }
+    }
+
+    // 5. 焦油坑受控减速
     if (defense && !pathname.endsWith('/health')) {
       const decision = defense.evaluate(ip);
       if (decision.tarpitMs > 0) {

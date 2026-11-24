@@ -31,14 +31,17 @@ interface PersistedAuthState {
   connectedAt: string | null;
   lastVerifiedAt: string | null;
   lastSyncAllAt: string | null;
+  /** 安全隐私模式：全量同步完成后自动清除本机教务 Cookie（用完即焚），默认开启 */
+  autoClearAfterSync: boolean;
 }
 
 interface GdutAuthStore extends PersistedAuthState {
   markConnected: () => void;
   markVerified: () => void;
   markExpired: () => void;
-  markDisconnected: () => void;
+  markDisconnected: (options?: { keepSyncMeta?: boolean }) => void;
   markSyncAll: () => void;
+  setAutoClearAfterSync: (enabled: boolean) => void;
 }
 
 function loadState(): PersistedAuthState {
@@ -53,12 +56,19 @@ function loadState(): PersistedAuthState {
         connectedAt: typeof parsed.connectedAt === 'string' ? parsed.connectedAt : null,
         lastVerifiedAt: typeof parsed.lastVerifiedAt === 'string' ? parsed.lastVerifiedAt : null,
         lastSyncAllAt: typeof parsed.lastSyncAllAt === 'string' ? parsed.lastSyncAllAt : null,
+        autoClearAfterSync: typeof parsed.autoClearAfterSync === 'boolean' ? parsed.autoClearAfterSync : true,
       };
     }
   } catch {
     // ignore
   }
-  return { status: 'disconnected', connectedAt: null, lastVerifiedAt: null, lastSyncAllAt: null };
+  return {
+    status: 'disconnected',
+    connectedAt: null,
+    lastVerifiedAt: null,
+    lastSyncAllAt: null,
+    autoClearAfterSync: true,
+  };
 }
 
 function saveState(state: PersistedAuthState) {
@@ -73,8 +83,9 @@ export const useGdutAuthStore = create<GdutAuthStore>((set, get) => ({
   ...loadState(),
   markConnected: () => {
     const now = new Date().toISOString();
+    const prev = get();
     const next: PersistedAuthState = {
-      ...get(),
+      ...prev,
       status: 'connected',
       connectedAt: now,
       lastVerifiedAt: now,
@@ -90,6 +101,7 @@ export const useGdutAuthStore = create<GdutAuthStore>((set, get) => ({
       connectedAt: prev.connectedAt ?? now,
       lastVerifiedAt: now,
       lastSyncAllAt: prev.lastSyncAllAt,
+      autoClearAfterSync: prev.autoClearAfterSync,
     };
     saveState(next);
     set(next);
@@ -101,12 +113,14 @@ export const useGdutAuthStore = create<GdutAuthStore>((set, get) => ({
     saveState(next);
     set(next);
   },
-  markDisconnected: () => {
+  markDisconnected: (options) => {
+    const prev = get();
     const next: PersistedAuthState = {
       status: 'disconnected',
       connectedAt: null,
       lastVerifiedAt: null,
-      lastSyncAllAt: null,
+      lastSyncAllAt: options?.keepSyncMeta ? prev.lastSyncAllAt : null,
+      autoClearAfterSync: prev.autoClearAfterSync,
     };
     saveState(next);
     set(next);
@@ -119,6 +133,19 @@ export const useGdutAuthStore = create<GdutAuthStore>((set, get) => ({
       connectedAt: prev.connectedAt ?? now,
       lastVerifiedAt: now,
       lastSyncAllAt: now,
+      autoClearAfterSync: prev.autoClearAfterSync,
+    };
+    saveState(next);
+    set(next);
+  },
+  setAutoClearAfterSync: (enabled) => {
+    const prev = get();
+    const next: PersistedAuthState = {
+      status: prev.status,
+      connectedAt: prev.connectedAt,
+      lastVerifiedAt: prev.lastVerifiedAt,
+      lastSyncAllAt: prev.lastSyncAllAt,
+      autoClearAfterSync: enabled,
     };
     saveState(next);
     set(next);
@@ -156,6 +183,8 @@ const COOKIE_ATTR_KEYS = new Set(['path', 'domain', 'expires', 'max-age', 'secur
  */
 async function persistResponseCookies(originUrl: string, headers: Record<string, string> | undefined): Promise<void> {
   if (!isNative || !headers) return;
+  // 开启「用完即焚」安全模式时，不把学校会话 Cookie 写入 14 天持久存储
+  if (useGdutAuthStore.getState().autoClearAfterSync) return;
   const setCookieKey = Object.keys(headers).find((k) => k.toLowerCase() === 'set-cookie');
   const rawHeader = setCookieKey ? headers[setCookieKey] : undefined;
   if (!rawHeader) return;
@@ -352,7 +381,7 @@ export async function connectGdutAuth({
 }
 
 /** 主动注销本机保存的广工统一认证与教务会话 */
-export async function disconnectGdutAuth(): Promise<void> {
+export async function disconnectGdutAuth(options?: { keepSyncMeta?: boolean }): Promise<void> {
   if (isNative) {
     for (const url of [JW_ORIGIN, AUTH_ORIGIN, EHALL_ORIGIN]) {
       try {
@@ -361,22 +390,27 @@ export async function disconnectGdutAuth(): Promise<void> {
         // ignore
       }
     }
+    try {
+      await CapacitorCookies.clearAllCookies();
+    } catch {
+      // ignore
+    }
   }
-  useGdutAuthStore.getState().markDisconnected();
+  useGdutAuthStore.getState().markDisconnected(options);
 }
 
 let lastKeepAliveAt = 0;
 
 /**
  * 第三层保活：前台轻量心跳（在 AppShell 挂载一次）。
- * 当用户已连接广工认证且距上次校验超过 15 分钟时，静默保活（必要时自动走 CAS 续期）。
+ * 当用户关闭「用完即焚」且已连接广工认证时，每 15 分钟静默保活一次。
  */
 export function initGdutSessionKeepAlive(): () => void {
   if (!isNative) return () => undefined;
 
   const ping = () => {
-    const { status } = useGdutAuthStore.getState();
-    if (status === 'disconnected') return;
+    const { status, autoClearAfterSync } = useGdutAuthStore.getState();
+    if (status === 'disconnected' || autoClearAfterSync) return;
     const now = Date.now();
     if (now - lastKeepAliveAt < KEEP_ALIVE_INTERVAL_MS) return;
     lastKeepAliveAt = now;
@@ -487,9 +521,15 @@ export async function syncAllFromGdut(queryClient: QueryClient, currentPlan: Cre
     await queryClient.invalidateQueries({ queryKey: keys.sharedCoursesPrefix });
     useGdutAuthStore.getState().markSyncAll();
 
+    const shouldAutoClear = useGdutAuthStore.getState().autoClearAfterSync;
+    if (shouldAutoClear) {
+      await disconnectGdutAuth({ keepSyncMeta: true });
+    }
+
+    const baseSummary = parts.length > 0 ? `已同步：${parts.join(' · ')}` : '已验证广工认证并完成数据核对';
     return {
       ok: true,
-      summary: parts.length > 0 ? `已同步：${parts.join(' · ')}` : '已验证广工认证并完成数据核对',
+      summary: shouldAutoClear ? `${baseSummary}（已自动清除本机教务 Cookie）` : baseSummary,
     };
   } catch (err) {
     return {

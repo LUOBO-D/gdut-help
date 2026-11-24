@@ -1,4 +1,7 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Inject, Injectable, Logger, OnModuleInit, Optional } from '@nestjs/common';
+import { ENV, type Env } from '../config/env.js';
+import { SecurityAlertService } from './security-alert.service.js';
+import { SecurityAuditService } from './security-audit.service.js';
 
 export type ThreatIncidentKind =
   | 'honeypot_hit'
@@ -66,6 +69,8 @@ export interface SecuritySummary {
   trackedIps: number;
   honeypotHitsTotal: number;
   quarantinesTotal: number;
+  minNativeVersion: number;
+  alertingConfigured: boolean;
   quarantinedList: { ip: string; remainingSeconds: number; banCount: number; lastKind: ThreatIncidentKind }[];
   recentEvents: SecurityEventLog[];
 }
@@ -108,7 +113,7 @@ function subnetOf(ip: string): string | null {
  * 4. 实时审计态势（Forensics）：保留最近 200 条安全告警，供管理员实时观测并支持手工解封。
  */
 @Injectable()
-export class ActiveDefenseService {
+export class ActiveDefenseService implements OnModuleInit {
   private readonly logger = new Logger('ActiveDefense');
   private readonly ipRecords = new Map<string, IpThreatRecord>();
   private readonly subnetRecords = new Map<string, SubnetRecord>();
@@ -116,6 +121,59 @@ export class ActiveDefenseService {
   private activeTarpits = 0;
   private honeypotHitsTotal = 0;
   private quarantinesTotal = 0;
+  private minNativeVersion = 0;
+
+  constructor(
+    @Optional() @Inject(ENV) env?: Env,
+    @Optional() private readonly audit?: SecurityAuditService,
+    @Optional() private readonly alerts?: SecurityAlertService,
+  ) {
+    this.minNativeVersion = env?.MIN_NATIVE_VERSION ?? 0;
+  }
+
+  async onModuleInit(): Promise<void> {
+    if (!this.audit) return;
+    const rows = await this.audit.loadActiveBans();
+    const now = Date.now();
+    let restored = 0;
+    for (const row of rows) {
+      const expiresMs = row.expiresAt.getTime();
+      if (expiresMs <= now) continue;
+      if (row.kind === 'ip') {
+        const ip = normalizeIp(row.target.replace(/^ip:/, ''));
+        if (isLoopbackOrUnknown(ip)) continue;
+        this.setBounded(this.ipRecords, MAX_TRACKED_IPS, ip, {
+          score: row.score,
+          lastEventAt: now,
+          quarantineUntil: expiresMs,
+          banCount: row.banCount,
+          lastKind: (row.reason in INCIDENT_WEIGHTS ? row.reason : 'honeypot_hit') as ThreatIncidentKind,
+        });
+        restored += 1;
+      } else if (row.kind === 'subnet') {
+        const subnet = row.target.replace(/^subnet:/, '');
+        this.setBounded(this.subnetRecords, MAX_TRACKED_SUBNETS, subnet, {
+          score: row.score,
+          windowStart: now,
+          quarantineUntil: expiresMs,
+        });
+        restored += 1;
+      }
+    }
+    if (restored > 0) {
+      this.logger.log(`已从数据库恢复 ${restored} 条未过期的高危封禁记录`);
+    }
+  }
+
+  getMinNativeVersion(): number {
+    return this.minNativeVersion;
+  }
+
+  setMinNativeVersion(version: number): number {
+    const next = Math.max(0, Math.min(999, Math.floor(version)));
+    this.minNativeVersion = next;
+    return next;
+  }
 
   /** 请求入口预检：零数据库开销直接决定是否拦截或减速 */
   evaluate(rawIp: string, now = Date.now()): ThreatDecision {
@@ -212,6 +270,38 @@ export class ActiveDefenseService {
       this.logger.warn(
         `[SECURITY_BAN] ip=${ip} kind=${kind} score=${score} banCount=${banCount} durationSec=${Math.round(durationMs / 1000)} path=${path.slice(0, 100)}`,
       );
+      if (durationMs >= 60 * 60_000 || kind === 'honeypot_hit') {
+        this.audit?.persistBan({
+          target: `ip:${ip}`,
+          kind: 'ip',
+          reason: kind,
+          score,
+          banCount,
+          expiresAt: new Date(quarantineUntil),
+        });
+      }
+      this.audit?.log({
+        event: kind === 'honeypot_hit' ? 'honeypot_hit' : 'ip_quarantined',
+        severity: kind === 'honeypot_hit' || banCount >= 2 ? 'critical' : 'warn',
+        userId,
+        ip,
+        path,
+        detail: { kind, score, banCount, durationSec: Math.round(durationMs / 1000) },
+      });
+      if (kind === 'honeypot_hit' || banCount >= 2) {
+        this.alerts?.notify(
+          {
+            dedupeKey: `${kind}:${ip}`,
+            title: kind === 'honeypot_hit' ? `命中蜜罐诱饵（已封禁 IP ${ip}）` : `高危来源反复触犯风控（第 ${banCount} 次隔离）`,
+            severity: 'critical',
+            event: kind,
+            ip,
+            path,
+            summary: `风险分 ${score}，隔离时长 ${Math.round(durationMs / 60_000)} 分钟，已写入持久化封禁表。`,
+          },
+          now,
+        );
+      }
     }
 
     this.setBounded(this.ipRecords, MAX_TRACKED_IPS, ip, {
@@ -235,6 +325,34 @@ export class ActiveDefenseService {
         this.logger.warn(
           `[SUBNET_BAN] subnet=${subnet} triggerIp=${ip} kind=${kind} subnetScore=${nextSubScore} durationSec=${SUBNET_QUARANTINE_MS / 1000}`,
         );
+        this.audit?.persistBan({
+          target: `subnet:${subnet}`,
+          kind: 'subnet',
+          reason: kind,
+          score: nextSubScore,
+          banCount: 1,
+          expiresAt: new Date(subUntil),
+        });
+        this.audit?.log({
+          event: 'subnet_quarantined',
+          severity: 'critical',
+          userId,
+          ip,
+          path,
+          detail: { subnet, kind, subnetScore: nextSubScore, durationSec: SUBNET_QUARANTINE_MS / 1000 },
+        });
+        this.alerts?.notify(
+          {
+            dedupeKey: `subnet:${subnet}`,
+            title: `检测到分布式网段打击（已联封 ${subnet}）`,
+            severity: 'critical',
+            event: 'subnet_quarantined',
+            ip: `${ip} (${subnet})`,
+            path,
+            summary: `2 分钟内网段累计风险分 ${nextSubScore}（触发类型 ${kind}），已自动联封整段 15 分钟。`,
+          },
+          now,
+        );
       }
       this.setBounded(this.subnetRecords, MAX_TRACKED_SUBNETS, subnet, {
         score: nextSubScore,
@@ -256,12 +374,24 @@ export class ActiveDefenseService {
     return ev;
   }
 
-  /** 管理员手工解封误伤 IP */
-  unbanIp(rawIp: string): boolean {
+  /** 管理员手工解封误伤 IP（同步清理持久化封禁表并记录审计日志） */
+  unbanIp(rawIp: string, adminUserId?: string): boolean {
     const ip = normalizeIp(rawIp);
     const removed = this.ipRecords.delete(ip);
     const subnet = subnetOf(ip);
-    if (subnet) this.subnetRecords.delete(subnet);
+    const targets = [`ip:${ip}`];
+    if (subnet) {
+      this.subnetRecords.delete(subnet);
+      targets.push(`subnet:${subnet}`);
+    }
+    this.audit?.removePersistedBans(targets);
+    this.audit?.log({
+      event: 'admin_unban',
+      severity: 'info',
+      userId: adminUserId,
+      ip,
+      detail: { targets, removedInMemory: removed },
+    });
     return removed;
   }
 
@@ -291,6 +421,8 @@ export class ActiveDefenseService {
       trackedIps: this.ipRecords.size,
       honeypotHitsTotal: this.honeypotHitsTotal,
       quarantinesTotal: this.quarantinesTotal,
+      minNativeVersion: this.minNativeVersion,
+      alertingConfigured: this.alerts?.isConfigured() ?? false,
       quarantinedList: quarantinedList.slice(0, 50),
       recentEvents: this.recentEvents.slice(0, 50),
     };

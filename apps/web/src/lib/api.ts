@@ -2,13 +2,14 @@ import {
   ErrorCode,
   NATIVE_CLIENT_HEADER,
   NATIVE_CLIENT_VALUE,
+  NATIVE_VERSION_HEADER,
   type ApiResponse,
   type AuthSession,
   type LogoutAllResult,
 } from '@gduthelp/shared';
 import { useAuth } from './auth-store';
 import { getRefreshToken, setRefreshToken } from './native-token';
-import { getApiBase, isNative } from './platform';
+import { getApiBase, isNative, NATIVE_APP_VERSION } from './platform';
 
 export const NETWORK_ERROR = 'NETWORK_ERROR';
 /** access token 剩余不足这么久时，先刷新再发请求 */
@@ -57,7 +58,10 @@ async function send<T>(path: string, { method = 'GET', body, auth = true, signal
   if (body !== undefined) headers['Content-Type'] = 'application/json';
   const token = useAuth.getState().accessToken;
   if (auth && token) headers.Authorization = `Bearer ${token}`;
-  if (isNative) headers[NATIVE_CLIENT_HEADER] = NATIVE_CLIENT_VALUE;
+  if (isNative) {
+    headers[NATIVE_CLIENT_HEADER] = NATIVE_CLIENT_VALUE;
+    headers[NATIVE_VERSION_HEADER] = String(NATIVE_APP_VERSION);
+  }
 
   let res: Response;
   try {
@@ -80,6 +84,10 @@ async function send<T>(path: string, { method = 'GET', body, auth = true, signal
 
   const json = (await res.json().catch(() => null)) as ApiResponse<T> | null;
   if (!json) throw new ApiError(ErrorCode.INTERNAL_ERROR, '服务器返回了无法识别的内容', res.status);
+  if (res.status === 426 || String(json.code) === ErrorCode.CLIENT_UPGRADE_REQUIRED) {
+    // 服务端强制要求升级旧版安装包：立即触发检查更新弹出不可关闭的安全升级弹窗
+    void import('./ota-updater').then((m) => m.checkForOtaUpdate({ interactive: true })).catch(() => undefined);
+  }
   if (!res.ok || json.code !== 0) throw new ApiError(String(json.code), json.message, res.status);
   return json.data;
 }

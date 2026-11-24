@@ -7,6 +7,7 @@ import {
   loginRequestSchema,
   NATIVE_CLIENT_HEADER,
   NATIVE_CLIENT_VALUE,
+  NATIVE_VERSION_HEADER,
   nativeRefreshSchema,
   passwordLoginRequestSchema,
   registerWithPasswordSchema,
@@ -32,6 +33,11 @@ import { AuthService, RefreshRaceException, type IssuedSession } from './auth.se
 export const REFRESH_COOKIE = 'gdut_rt';
 const REFRESH_COOKIE_PATH = '/api/v1/auth';
 const isNative = (header: string | undefined) => header === NATIVE_CLIENT_VALUE;
+const parseNativeVer = (header: string | undefined): number | undefined => {
+  if (!header) return undefined;
+  const n = Number.parseInt(header, 10);
+  return Number.isFinite(n) && n > 0 && n <= 999 ? n : undefined;
+};
 /**
  * 网页端：refresh token 放在 HttpOnly Cookie 里，JS 读不到。
  * App 端（请求头 X-Client: native）：页面来自 https://localhost，和 API 不同源，Cookie 带不过去，
@@ -66,12 +72,21 @@ export class AuthController {
     @Body({ schema: loginRequestSchema }) body: LoginRequest,
     @Headers('user-agent') userAgent: string | undefined,
     @Headers(NATIVE_CLIENT_HEADER) client: string | undefined,
+    @Headers(NATIVE_VERSION_HEADER) nativeVer: string | undefined,
+    @Req() req: Request,
     @Res({ passthrough: true }) res: unknown,
   ): Promise<AuthSession> {
     return this.respond(
       res,
       client,
-      await this.auth.loginWithEmailCode(body.email, body.code, userAgent, body.inviteCode),
+      await this.auth.loginWithEmailCode(
+        body.email,
+        body.code,
+        userAgent,
+        body.inviteCode,
+        clientIp(req),
+        isNative(client) ? parseNativeVer(nativeVer) : undefined,
+      ),
     );
   }
 
@@ -83,13 +98,20 @@ export class AuthController {
     @Body({ schema: passwordLoginRequestSchema }) body: PasswordLoginRequest,
     @Headers('user-agent') userAgent: string | undefined,
     @Headers(NATIVE_CLIENT_HEADER) client: string | undefined,
+    @Headers(NATIVE_VERSION_HEADER) nativeVer: string | undefined,
     @Req() req: Request,
     @Res({ passthrough: true }) res: unknown,
   ): Promise<AuthSession> {
     return this.respond(
       res,
       client,
-      await this.auth.loginWithPassword(body.email, body.password, userAgent, clientIp(req)),
+      await this.auth.loginWithPassword(
+        body.email,
+        body.password,
+        userAgent,
+        clientIp(req),
+        isNative(client) ? parseNativeVer(nativeVer) : undefined,
+      ),
     );
   }
 
@@ -101,17 +123,32 @@ export class AuthController {
     @Body({ schema: registerWithPasswordSchema }) body: RegisterWithPasswordRequest,
     @Headers('user-agent') userAgent: string | undefined,
     @Headers(NATIVE_CLIENT_HEADER) client: string | undefined,
+    @Headers(NATIVE_VERSION_HEADER) nativeVer: string | undefined,
+    @Req() req: Request,
     @Res({ passthrough: true }) res: unknown,
   ): Promise<AuthSession> {
-    return this.respond(res, client, await this.auth.registerWithPassword(body, userAgent));
+    return this.respond(
+      res,
+      client,
+      await this.auth.registerWithPassword(
+        body,
+        userAgent,
+        clientIp(req),
+        isNative(client) ? parseNativeVer(nativeVer) : undefined,
+      ),
+    );
   }
 
   /** 忘记密码：通过邮箱验证码重置密码并吊销所有旧会话 */
   @Post('password/reset')
   @HttpCode(200)
   @Throttle({ default: { limit: 5, ttl: 60_000 } })
-  async resetPassword(@Body({ schema: resetPasswordSchema }) body: ResetPasswordRequest): Promise<null> {
-    await this.auth.resetPassword(body);
+  async resetPassword(
+    @Body({ schema: resetPasswordSchema }) body: ResetPasswordRequest,
+    @Headers('user-agent') userAgent: string | undefined,
+    @Req() req: Request,
+  ): Promise<null> {
+    await this.auth.resetPassword(body, clientIp(req), userAgent);
     return null;
   }
 
@@ -123,8 +160,10 @@ export class AuthController {
   changePassword(
     @CurrentUser() user: AuthUser,
     @Body({ schema: changePasswordSchema }) body: ChangePasswordRequest,
+    @Headers('user-agent') userAgent: string | undefined,
+    @Req() req: Request,
   ): Promise<UserProfile> {
-    return this.auth.changePassword(user.id, body);
+    return this.auth.changePassword(user.id, body, clientIp(req), userAgent);
   }
   @Post('refresh')
   @HttpCode(200)
@@ -134,11 +173,22 @@ export class AuthController {
     @Body({ schema: nativeRefreshSchema }) body: NativeRefreshRequest,
     @Headers('user-agent') userAgent: string | undefined,
     @Headers(NATIVE_CLIENT_HEADER) client: string | undefined,
+    @Headers(NATIVE_VERSION_HEADER) nativeVer: string | undefined,
+    @Req() req: Request,
     @Res({ passthrough: true }) res: unknown,
   ): Promise<AuthSession> {
     const token = isNative(client) ? body?.refreshToken : cookie;
     try {
-      return this.respond(res, client, await this.auth.refresh(token, userAgent));
+      return this.respond(
+        res,
+        client,
+        await this.auth.refresh(
+          token,
+          userAgent,
+          clientIp(req),
+          isNative(client) ? parseNativeVer(nativeVer) : undefined,
+        ),
+      );
     } catch (err) {
       if (!isNative(client) && !(err instanceof RefreshRaceException)) {
         this.adapterHost.httpAdapter.clearCookie(res, REFRESH_COOKIE, { path: REFRESH_COOKIE_PATH });
@@ -170,10 +220,12 @@ export class AuthController {
   @Throttle({ default: { limit: 10, ttl: 60_000 } })
   async logoutAll(
     @CurrentUser() user: AuthUser,
+    @Headers('user-agent') userAgent: string | undefined,
     @Headers(NATIVE_CLIENT_HEADER) client: string | undefined,
+    @Req() req: Request,
     @Res({ passthrough: true }) res: unknown,
   ): Promise<LogoutAllResult> {
-    const result = await this.auth.logoutAll(user.id);
+    const result = await this.auth.logoutAll(user.id, clientIp(req), userAgent);
     if (!isNative(client)) {
       this.adapterHost.httpAdapter.clearCookie(res, REFRESH_COOKIE, { path: REFRESH_COOKIE_PATH });
     }

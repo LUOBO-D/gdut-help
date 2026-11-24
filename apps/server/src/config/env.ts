@@ -75,6 +75,14 @@ const envSchema = z
     STATIC_DIR: z.string().default(''),
     /** 可选：自托管安卓 App OTA 热更新包目录（包含 manifest.json 与 bundle-*.zip），默认 apps/server/ota-bundles */
     OTA_DIR: z.string().default(''),
+    /** 可选：服务端强制要求的最低安卓原生外壳 versionCode（0 表示暂不强制拦截；设为 7 可强制淘汰旧测试 Debug 包） */
+    MIN_NATIVE_VERSION: z.coerce.number().int().min(0).max(999).default(0),
+    /** 可选：高危安全事件（蜜罐/网段封禁/多次隔离）实时邮件告警收件人，留空不发送 */
+    SECURITY_ALERT_EMAIL: z.string().trim().default(''),
+    /** 可选：高危安全事件实时 Webhook 告警地址（支持飞书/企微/钉钉/Discord/通用 JSON，必须 HTTPS） */
+    SECURITY_ALERT_WEBHOOK_URL: z.string().trim().default(''),
+    /** 是否信任 Cloudflare 回源头 CF-Connecting-IP（仅在 UFW 限制 443 仅放行 Cloudflare IP 段时开启） */
+    TRUST_CF_HEADERS: bool,
   })
   .superRefine((env, ctx) => {
     if (env.NODE_ENV === 'production' && env.MAIL_DRIVER === 'console') {
@@ -91,6 +99,7 @@ const envSchema = z
     SMTP_SECURE: env.SMTP_SECURE ?? env.SMTP_PORT === 465,
     COOKIE_SECURE: env.COOKIE_SECURE ?? env.NODE_ENV === 'production',
     MERCHANT_AUTO_APPROVE: env.MERCHANT_AUTO_APPROVE ?? true,
+    TRUST_CF_HEADERS: env.TRUST_CF_HEADERS ?? false,
   }));
 
 export type Env = z.infer<typeof envSchema>;

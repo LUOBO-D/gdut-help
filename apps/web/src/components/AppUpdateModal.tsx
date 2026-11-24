@@ -32,13 +32,14 @@ export function AppUpdateModal() {
   const dismissCurrent = useOtaStore((s) => s.dismissCurrent);
 
   const busy = phase === 'downloading' || phase === 'applying';
+  const forced = Boolean(available?.forceUpgrade);
   const visible = Boolean(open && available);
 
   const handleDefer = useCallback(() => {
-    if (busy) return;
+    if (busy || forced) return;
     dismissCurrent();
     toast.info('已暂缓更新，可随时在「我的 → 检查更新」升级');
-  }, [busy, dismissCurrent]);
+  }, [busy, forced, dismissCurrent]);
 
   const handleConfirm = useCallback(async () => {
     if (busy) return;
@@ -49,10 +50,10 @@ export function AppUpdateModal() {
   useEffect(() => {
     if (!visible) return;
     const pop = pushSheet(() => {
-      if (!busy) handleDefer();
+      if (!busy && !forced) handleDefer();
     });
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && !busy) handleDefer();
+      if (e.key === 'Escape' && !busy && !forced) handleDefer();
     };
     const prevOverflow = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
@@ -62,7 +63,7 @@ export function AppUpdateModal() {
       document.body.style.overflow = prevOverflow;
       window.removeEventListener('keydown', onKey);
     };
-  }, [visible, busy, handleDefer]);
+  }, [visible, busy, forced, handleDefer]);
 
   if (typeof document === 'undefined') return null;
 
@@ -96,7 +97,7 @@ export function AppUpdateModal() {
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             onClick={() => {
-              if (!busy) handleDefer();
+              if (!busy && !forced) handleDefer();
             }}
           />
 
@@ -135,7 +136,7 @@ export function AppUpdateModal() {
                 </div>
               </div>
 
-              {!busy && (
+              {!busy && !forced && (
                 <button
                   type="button"
                   onClick={handleDefer}
@@ -152,7 +153,11 @@ export function AppUpdateModal() {
               <span className="rounded-full bg-current/8 px-2.5 py-1 font-medium tabular-nums">
                 当前 v{available.currentVersion} → v{latest.version}
               </span>
-              {needsNative ? (
+              {forced ? (
+                <span className="rounded-full bg-danger/15 px-2.5 py-1 font-semibold text-danger">
+                  安全强制升级 · 请卸载旧版并安装正式安全版
+                </span>
+              ) : needsNative ? (
                 <span className="rounded-full bg-amber-500/15 px-2.5 py-1 font-medium text-amber-600 dark:text-amber-300">
                   含底层升级 · 需下载新版安装包
                 </span>
@@ -203,21 +208,23 @@ export function AppUpdateModal() {
 
             {/* 用户自主选择操作区 */}
             <div className="mt-5 flex items-center gap-2.5">
-              <Button
-                variant="ghost"
-                className="h-11 flex-1 text-sm"
-                disabled={busy}
-                onClick={handleDefer}
-              >
-                暂不更新
-              </Button>
+              {!forced && (
+                <Button
+                  variant="ghost"
+                  className="h-11 flex-1 text-sm"
+                  disabled={busy}
+                  onClick={handleDefer}
+                >
+                  暂不更新
+                </Button>
+              )}
               <Button
                 variant="primary"
-                className="h-11 flex-[1.35] text-sm"
+                className={forced ? 'h-11 w-full text-sm' : 'h-11 flex-[1.35] text-sm'}
                 loading={busy}
                 onClick={() => void handleConfirm()}
               >
-                {primaryLabel}
+                {forced ? '立即下载正式安全版' : primaryLabel}
               </Button>
             </div>
           </motion.div>

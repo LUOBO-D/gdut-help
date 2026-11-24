@@ -34,6 +34,11 @@ export class MailService {
     await this.send(to, `⏰ ${title}`, `${body}\n\n打开 GDUT Help：${url}\n\n（在「我的 → 提醒设置」里可以关闭邮件提醒）`);
   }
 
+  /** 高危安全事件实时告警邮件（蜜罐诱捕、网段联封、反复恶意隔离等） */
+  async sendSecurityAlert(to: string, subject: string, body: string): Promise<void> {
+    await this.send(to, subject, body);
+  }
+
   private async send(to: string, subject: string, text: string): Promise<void> {
     if (!this.transporter) {
       // 仅开发环境：不真实发信，把内容打印到日志（env 校验保证生产环境不会走到这里）

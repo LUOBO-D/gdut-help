@@ -1,5 +1,6 @@
 import { BadRequestException, Inject, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import type { AppBundleManifest } from '@gduthelp/shared';
+import { createHash } from 'node:crypto';
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { z } from 'zod';
@@ -16,6 +17,7 @@ const manifestSchema = z.object({
   sha256: z.string().regex(/^[a-f0-9]{64}$/i).optional(),
   sizeBytes: z.number().int().nonnegative().optional(),
   apkUrl: z.string().url().max(500).optional(),
+  forceUpgrade: z.boolean().optional(),
   publishedAt: z.string().min(1),
 });
 
@@ -29,6 +31,7 @@ const manifestSchema = z.object({
 export class AppUpdateService {
   private readonly logger = new Logger(AppUpdateService.name);
   private readonly otaDir: string;
+  private apkShaCache: { mtimeMs: number; size: number; sha256: string } | null = null;
 
   constructor(@Inject(ENV) env: Env) {
     this.otaDir = resolve(env.OTA_DIR || resolve(process.cwd(), 'ota-bundles'));
@@ -60,6 +63,23 @@ export class AppUpdateService {
   /** 是否在云端目录托管了最新版 APK 安装包 */
   hasLatestApk(): boolean {
     return existsSync(join(this.otaDir, LATEST_APK_FILENAME));
+  }
+
+  /** 计算并缓存最新版正式签名 APK 的 SHA-256 指纹，供客户端与用户核验 */
+  getLatestApkSha256(): string | null {
+    const filePath = join(this.otaDir, LATEST_APK_FILENAME);
+    if (!existsSync(filePath)) return null;
+    try {
+      const st = statSync(filePath);
+      if (this.apkShaCache && this.apkShaCache.mtimeMs === st.mtimeMs && this.apkShaCache.size === st.size) {
+        return this.apkShaCache.sha256;
+      }
+      const sha256 = createHash('sha256').update(readFileSync(filePath)).digest('hex');
+      this.apkShaCache = { mtimeMs: st.mtimeMs, size: st.size, sha256 };
+      return sha256;
+    } catch {
+      return null;
+    }
   }
 
   /** 解析服务端托管的最新版 APK 绝对路径 */

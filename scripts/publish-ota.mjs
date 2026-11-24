@@ -28,12 +28,15 @@ function parseArgs(argv) {
   let notes = '';
   let notesFile = '';
   let apkUrl = '';
-  let minNativeVersion = 6;
+  let minNativeVersion = 7;
+  let forceUpgrade = false;
   let skipBuild = false;
 
   for (const arg of argv) {
     if (arg === '--skip-build') {
       skipBuild = true;
+    } else if (arg === '--force-upgrade') {
+      forceUpgrade = true;
     } else if (arg.startsWith('--min-native=')) {
       minNativeVersion = Number.parseInt(arg.slice('--min-native='.length), 10);
     } else if (arg.startsWith('--notes-file=')) {
@@ -54,15 +57,15 @@ function parseArgs(argv) {
   notes = notes.replace(/\\n/g, '\n').trim();
 
   if (!/^\d+\.\d+\.\d+([-.][a-zA-Z0-9.]+)?$/.test(version)) {
-    console.error('用法: pnpm ota:pack <version> [更新说明] [--min-native=4] [--notes-file=notes.txt]');
-    console.error('示例: pnpm ota:pack 0.3.2 "1. 新增更新说明弹窗\\n2. 支持自主选择更新"');
+    console.error('用法: pnpm ota:pack <version> [更新说明] [--min-native=7] [--force-upgrade] [--notes-file=notes.txt]');
+    console.error('示例: pnpm ota:pack 0.3.13 "1. 硬件加密升级\\n2. 安全中心上线"');
     process.exit(1);
   }
   if (!Number.isInteger(minNativeVersion) || minNativeVersion < 1) {
     console.error('--min-native 必须是正整数');
     process.exit(1);
   }
-  return { version, notes: notes || `热更新 v${version}`, minNativeVersion, apkUrl: apkUrl || undefined, skipBuild };
+  return { version, notes: notes || `热更新 v${version}`, minNativeVersion, forceUpgrade, apkUrl: apkUrl || undefined, skipBuild };
 }
 
 // IEEE 802.3 CRC-32 表
@@ -172,7 +175,7 @@ function createZipBuffer(files) {
 }
 
 function main() {
-  const { version, notes, minNativeVersion, apkUrl, skipBuild } = parseArgs(process.argv.slice(2));
+  const { version, notes, minNativeVersion, forceUpgrade, apkUrl, skipBuild } = parseArgs(process.argv.slice(2));
   const env = { ...process.env, VITE_APP_VERSION: version };
 
   if (!skipBuild) {
@@ -205,6 +208,7 @@ function main() {
     sha256,
     sizeBytes: zipBuf.length,
     ...(apkUrl ? { apkUrl } : {}),
+    ...(forceUpgrade ? { forceUpgrade: true } : {}),
     publishedAt: new Date().toISOString(),
   };
   writeFileSync(join(otaDir, 'manifest.json'), `${JSON.stringify(manifest, null, 2)}\n`, 'utf-8');

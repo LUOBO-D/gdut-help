@@ -9,6 +9,7 @@ import { UserGuardCacheService } from '../auth/user-guard-cache.service.js';
 import { AppException } from '../common/app.exception.js';
 import type { User } from '../generated/prisma/client.js';
 import { PrismaService } from '../prisma/prisma.service.js';
+import { SecurityAuditService } from '../security/security-audit.service.js';
 
 export function toUserProfile(user: User): UserProfile {
   return {
@@ -31,6 +32,7 @@ export class UsersService {
   constructor(
     private readonly prisma: PrismaService,
     @Optional() private readonly guardCache?: UserGuardCacheService,
+    @Optional() private readonly audit?: SecurityAuditService,
   ) {}
 
   async getProfile(userId: string): Promise<UserProfile> {
@@ -186,7 +188,7 @@ export class UsersService {
   }
 
   /** 注销当前账号：核对确认邮箱后级联删除个人数据，并立即吊销所有有效会话 */
-  async deleteAccount(userId: string, confirmEmail: string): Promise<void> {
+  async deleteAccount(userId: string, confirmEmail: string, ip?: string, userAgent?: string): Promise<void> {
     const user = await this.prisma.user.findUnique({ where: { id: userId }, select: { id: true, email: true } });
     if (!user) throw new AppException(ErrorCode.UNAUTHORIZED, '账号不存在', HttpStatus.UNAUTHORIZED);
     if (user.email.toLowerCase() !== confirmEmail.trim().toLowerCase()) {
@@ -194,5 +196,13 @@ export class UsersService {
     }
     await this.prisma.user.delete({ where: { id: userId } });
     this.guardCache?.markRevokedNow(userId);
+    this.audit?.log({
+      event: 'account_deleted',
+      severity: 'warn',
+      ip,
+      userAgent,
+      path: '/api/v1/me',
+      detail: { deletedUserId: userId },
+    });
   }
 }

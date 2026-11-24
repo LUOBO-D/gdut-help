@@ -1,9 +1,10 @@
-import { Controller, Get, Inject, Param, Req, Res } from '@nestjs/common';
+import { Controller, Get, Inject, Optional, Param, Req, Res } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
 import type { AppBundleManifest, AppUpdateCheckResponse } from '@gduthelp/shared';
 import type { Request, Response } from 'express';
 import { Public } from '../auth/auth.decorators.js';
 import { ENV, type Env } from '../config/env.js';
+import { ActiveDefenseService } from '../security/active-defense.service.js';
 import { AppUpdateService } from './app-update.service.js';
 
 const SAFE_DEV_HOST = /^(localhost|127\.0\.0\.1|10\.\d+\.\d+\.\d+|192\.168\.\d+\.\d+)(:\d+)?$/i;
@@ -14,6 +15,7 @@ export class AppUpdateController {
   constructor(
     private readonly updates: AppUpdateService,
     @Inject(ENV) private readonly env: Env,
+    @Optional() private readonly defense?: ActiveDefenseService,
   ) {}
 
   @Get('update')
@@ -23,6 +25,8 @@ export class AppUpdateController {
     const hasApk = this.updates.hasLatestApk();
     const defaultApkPath = hasApk ? '/api/v1/app/apk/latest' : null;
     const defaultApkUrl = defaultApkPath ? (origin ? `${origin}${defaultApkPath}` : defaultApkPath) : null;
+    const apkSha256 = hasApk ? this.updates.getLatestApkSha256() : null;
+    const minSupportedNativeVersion = this.defense?.getMinNativeVersion() ?? this.env.MIN_NATIVE_VERSION;
 
     const latest: AppBundleManifest | null = this.updates.getLatest();
     if (!latest) {
@@ -32,6 +36,8 @@ export class AppUpdateController {
         downloadUrl: null,
         apkPath: defaultApkPath,
         apkUrl: defaultApkUrl,
+        apkSha256,
+        minSupportedNativeVersion,
       };
     }
     const downloadPath = `/api/v1/app/bundles/${encodeURIComponent(latest.file)}`;
@@ -41,6 +47,8 @@ export class AppUpdateController {
       downloadUrl: origin ? `${origin}${downloadPath}` : downloadPath,
       apkPath: latest.apkUrl ? null : defaultApkPath,
       apkUrl: latest.apkUrl ?? defaultApkUrl,
+      apkSha256,
+      minSupportedNativeVersion,
     };
   }
 

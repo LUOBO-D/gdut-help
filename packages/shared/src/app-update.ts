@@ -13,6 +13,8 @@ export interface AppBundleManifest {
   sizeBytes?: number;
   /** 可选：自定义最新版 APK 下载地址（未填时自动使用服务端托管的 /api/v1/app/apk/latest） */
   apkUrl?: string;
+  /** 可选：安全紧急更新标志；为 true 且需要原生升级时，客户端不允许点击「暂不更新」 */
+  forceUpgrade?: boolean;
   /** 发布时间（ISO 8601） */
   publishedAt: string;
 }
@@ -27,6 +29,10 @@ export interface AppUpdateCheckResponse {
   apkPath?: string | null;
   /** 最新版 APK 的完整下载链接（优先取 manifest.apkUrl，其次取服务端托管 APK） */
   apkUrl?: string | null;
+  /** 最新版正式签名 APK 的 SHA-256 校验指纹（便于用户在安全中心公开核验） */
+  apkSha256?: string | null;
+  /** 服务端当前强制要求的最低原生外壳 versionCode（0 表示暂不强制拦截） */
+  minSupportedNativeVersion?: number;
 }
 
 /** 比较语义化版本（仅主/次/修订号）：a > b 返回正数，相等返回 0，a < b 返回负数 */

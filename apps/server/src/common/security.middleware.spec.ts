@@ -1,7 +1,10 @@
-import { isTrustedPushEndpoint } from '@gduthelp/shared';
-import type { Response } from 'express';
+import { ErrorCode, isTrustedPushEndpoint } from '@gduthelp/shared';
+import type { Request, Response } from 'express';
 import { describe, expect, it, vi } from 'vitest';
 import { ActiveDefenseService } from '../security/active-defense.service.js';
+import { SecurityAlertService } from '../security/security-alert.service.js';
+import type { Env } from '../config/env.js';
+import { clientIp, maskIp, parseDeviceLabel, setTrustCfHeaders } from './client-ip.js';
 import { createSecurityMiddleware, type RequestWithId } from './security.middleware.js';
 
 function createMockRes() {
@@ -90,6 +93,100 @@ describe('securityMiddleware', () => {
     activeMw(nextReq, nextRes.res, nextFn);
     expect(nextFn).not.toHaveBeenCalled();
     expect(nextRes.getStatus()).toBe(403);
+  });
+
+  it('blocks legacy debug native APKs with 426 when minNativeVersion is set, while allowing update/health and newer APKs', () => {
+    const defense = new ActiveDefenseService();
+    defense.setMinNativeVersion(7);
+    const activeMw = createSecurityMiddleware(true, true, defense);
+
+    const makeReq = (url: string, headers: Record<string, string>) =>
+      ({
+        method: 'GET',
+        originalUrl: url,
+        header: (name: string) => headers[name.toLowerCase()],
+        ip: '203.0.113.10',
+      }) as unknown as RequestWithId;
+
+    // 1. Legacy debug APK without x-native-version -> 426 CLIENT_UPGRADE_REQUIRED
+    const oldRes = createMockRes();
+    const oldNext = vi.fn();
+    activeMw(makeReq('/api/v1/grades', { 'x-client': 'native' }), oldRes.res, oldNext);
+    expect(oldNext).not.toHaveBeenCalled();
+    expect(oldRes.getStatus()).toBe(426);
+    expect((oldRes.getBody() as { code?: string })?.code).toBe(ErrorCode.CLIENT_UPGRADE_REQUIRED);
+
+    // 2. Old native APK checking /api/v1/app/update MUST still be allowed
+    const updRes = createMockRes();
+    const updNext = vi.fn();
+    activeMw(makeReq('/api/v1/app/update', { 'x-client': 'native' }), updRes.res, updNext);
+    expect(updNext).toHaveBeenCalledOnce();
+
+    // 3. New signed APK with x-native-version: 7 -> allowed
+    const newRes = createMockRes();
+    const newNext = vi.fn();
+    activeMw(makeReq('/api/v1/grades', { 'x-client': 'native', 'x-native-version': '7' }), newRes.res, newNext);
+    expect(newNext).toHaveBeenCalledOnce();
+
+    // 4. Web client (no x-client: native) -> allowed
+    const webRes = createMockRes();
+    const webNext = vi.fn();
+    activeMw(makeReq('/api/v1/grades', {}), webRes.res, webNext);
+    expect(webNext).toHaveBeenCalledOnce();
+  });
+});
+
+describe('clientIp helpers and Cloudflare header trust', () => {
+  it('only trusts CF-Connecting-IP when explicitly enabled', () => {
+    const req = {
+      ip: '198.51.100.1',
+      header: (k: string) => (k.toLowerCase() === 'cf-connecting-ip' ? '203.0.113.99' : undefined),
+    } as unknown as Request;
+
+    setTrustCfHeaders(false);
+    expect(clientIp(req)).toBe('198.51.100.1');
+
+    setTrustCfHeaders(true);
+    expect(clientIp(req)).toBe('203.0.113.99');
+
+    setTrustCfHeaders(false);
+  });
+
+  it('masks IPv4/IPv6 addresses and formats device labels', () => {
+    expect(maskIp('120.230.45.67')).toBe('120.230.*.*');
+    expect(maskIp('::ffff:10.33.28.131')).toBe('10.33.*.*');
+    expect(maskIp('127.0.0.1')).toBe('本机');
+    expect(parseDeviceLabel('Mozilla/5.0 (Linux; Android 14; Pixel 8 Build/UQ1A) AppleWebKit/537.36', 7)).toEqual({
+      label: 'Android App · Pixel 8 (v7)',
+      platform: 'android',
+    });
+  });
+});
+
+describe('SecurityAlertService', () => {
+  it('deduplicates repeated alerts within cooldown and respects configuration', () => {
+    const mail = { sendSecurityAlert: vi.fn().mockResolvedValue(undefined) };
+    const env = {
+      NODE_ENV: 'production',
+      SECURITY_ALERT_EMAIL: 'sec@example.com',
+      SECURITY_ALERT_WEBHOOK_URL: '',
+    } as unknown as Env;
+    const alerts = new SecurityAlertService(env, mail as never);
+
+    const t0 = 1_700_000_000_000;
+    const payload = {
+      dedupeKey: 'honeypot:203.0.113.5',
+      title: 'Honeypot Hit',
+      severity: 'critical' as const,
+      event: 'honeypot_hit',
+      ip: '203.0.113.5',
+      summary: 'Hit /.env',
+    };
+
+    expect(alerts.notify(payload, t0)).toBe(true);
+    expect(alerts.notify(payload, t0 + 60_000)).toBe(false);
+    expect(alerts.notify(payload, t0 + 16 * 60_000)).toBe(true);
+    expect(mail.sendSecurityAlert).toHaveBeenCalledTimes(2);
   });
 });
 
